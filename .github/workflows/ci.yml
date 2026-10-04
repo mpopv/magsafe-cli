@@ -13,6 +13,6 @@ jobs:
       - name: Build and test
         run: make test CFLAGS="-O2 -Wall -Wextra -Werror"
       - name: Check formatting
-        run: xcrun clang-format --dry-run --Werror src/*.c src/*.h
+        run: xcrun clang-format --dry-run --Werror src/*.c src/*.h src/*.m tests/*.c tools/*.m
       - name: Lint man page
         run: mandoc -T lint -W warning man/magsafe.1
