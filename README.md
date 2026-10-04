@@ -1,12 +1,13 @@
 # magsafe
 
-Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, and read the cable's firmware state.
+Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, and read the cable's firmware state.
 
 ```sh
 magsafe led set amber                 # solid amber
 magsafe led brightness green 25       # dim green
 magsafe led blink alternate -c 6      # flash green and amber in turn
-magsafe led fade green               # breathe until Ctrl-C
+magsafe led fade green                # breathe until Ctrl-C
+magsafe visualizer                    # pulse to the music until Ctrl-C
 magsafe reset                         # hand the light back to macOS
 ```
 
@@ -51,10 +52,12 @@ magsafe [options] <command> [<args>]
 | `led fade-in <color>` | Ramp up, then switch off |
 | `led fade-out <color>` | Switch on, then ramp down |
 | `led fade <color>` | Ramp up, then ramp down |
+| `led stream <color>` | Set `green` or `amber` brightness from lines on standard input |
 | `led get` | Show the light mode and PWM output |
 | `firmware version` | Show the cable firmware version |
 | `firmware security` | Show the configuration-setter lock and signature-skip flags |
 | `firmware calibration` | Show the four stored light calibration values |
+| `visualizer [<color>]` | Pulse `green` (the default) or `amber` to the audio that is playing |
 | `capabilities` | List supported and unavailable functions |
 | `version` | Show the `magsafe` version |
 | `help` | Show help |
@@ -68,6 +71,7 @@ magsafe [options] <command> [<args>]
 | `-c`, `--count <n>` | Blink or fade cycles: 1–300 or `infinite` (default `infinite`) |
 | `-i`, `--interval-ms <ms>` | Blink on and off time, or dark time after each fade cycle: 100–10000 (default 500) |
 | `-d`, `--duration-ms <ms>` | Time for each fade ramp: 500–60000 (default 1000) |
+| `--preview` | Visualizer only: show the levels in the terminal instead of on the light |
 
 Options can go before or after the command, and each can appear once. Write values as `--count 4`, `--count=4`, or `-c 4`.
 
@@ -125,6 +129,37 @@ An effect repeats until Ctrl-C (exit code 130) or a device error unless you give
 
 Preparation is 450 ms, or `count × 450` ms for `alternate`. Device calls add some time beyond the plan. `--dry-run` shows the planned total. For a longer run, leave out `--count`.
 
+### Visualizer
+
+```sh
+magsafe visualizer              # green, until Ctrl-C
+magsafe visualizer amber
+magsafe visualizer --preview    # levels in the terminal; no cable or sudo
+```
+
+The light follows whatever the Mac is playing. It brightens with the bass (40–160 Hz) and flashes to full brightness on each kick drum or other sharp rise in the bass. Automatic gain gives quiet and loud music the same range, and silence leaves the light dark. The color stays the same for the whole run, because a color change takes the cable 450 ms in the dark.
+
+- **Audio:** a Core Audio process tap captures a mono mix of everything the Mac plays, without a virtual audio driver. This needs macOS 14.2 or later.
+- **Permission:** macOS grants System Audio Recording permission per app, and for a command-line tool that app is your terminal. If the app has never been asked, `magsafe` asks macOS to request permission. Terminal and many other terminal apps don't declare that they record audio, so macOS shows no prompt, and `magsafe` stops with instructions. Add the terminal app under **System Audio Recording Only** in System Settings > Privacy & Security > Screen & System Audio Recording, then run `magsafe` again.
+- **Privileges:** audio capture and analysis run as you, and never as root. They send one brightness per frame to `magsafe led stream`, which runs through sudo. The permission check comes before sudo asks for a password.
+- **Timing:** 30 frames a second. Each frame is held back by the output device's reported latency, minus about 25 ms for the light itself, so that the light changes when you hear the sound. This matters most with Bluetooth headphones.
+- **Stopping:** Ctrl-C (`SIGINT`, `SIGTERM`, or `SIGHUP`) resets the light. As with an infinite effect, the stop is reported as an error, with exit code 130 for Ctrl-C.
+- After 5 seconds without any audio, `magsafe` prints a reminder about the permission, since nothing playing looks the same as capture that is blocked.
+- `--preview` draws a level meter on standard error instead of driving the light, so it needs neither the cable nor sudo. When standard error is not a terminal, it prints one percentage per line.
+
+### Stream
+
+```sh
+# Ramp green up over 2 seconds; the light resets when the input ends.
+for p in $(seq 0 5 100); do echo "$p"; sleep 0.1; done | magsafe led stream green
+```
+
+`led stream` reads brightness percentages from standard input, one per line. Spaces around a number are allowed, and blank lines are skipped. It prepares the color as an effect does, then applies values as they arrive:
+
+- It uses only the newest value, at most 40 times a second, so input that comes faster is skipped rather than queued. Pace the input yourself: `seq 0 100 | magsafe led stream green` jumps straight to 100%.
+- Every 5 seconds it checks that the cable still shows the color, and stops if macOS or another program changed it.
+- It runs `reset` at the end of input, on Ctrl-C, on an error, or at an invalid line. An invalid line exits with code 2.
+
 ### Reset
 
 ```sh
@@ -177,10 +212,11 @@ Without `--json`, commands that change the light print nothing on success. Read 
 | `led brightness` | `firmware`, `version_word`, `pwm0`, `pwm3`, `color_selector`, `color`, `percent`, `pwm_verified` |
 | `led blink` | `firmware`, `version_word`, `color`, `flashes`, `brightness_percent`, `system_color_control_requested` |
 | `led fade-in`, `led fade-out`, `led fade` | `firmware`, `version_word`, `color`, `fades`, `fade_ms`, `interval_ms`, `pwm_verified`, `brightness_percent`, `system_color_control_requested` |
+| `led stream` | `firmware`, `version_word`, `color`, `values`, `writes`, `brightness_percent`, `system_color_control_requested` |
 | `reset` | `firmware`, `version_word`, `brightness_percent`, `system_color_control_requested` |
 | `capabilities` | `cli_version`, `diagnostic_firmware`, `supported`, `unavailable` (no `command`) |
 
-`version_word` and `security_word` are hexadecimal strings. On success, `brightness_percent` is always `100`, and `pwm_verified` and `system_color_control_requested` are always `true`. An effect that is stopped reports an error, not a result.
+`version_word` and `security_word` are hexadecimal strings. On success, `brightness_percent` is always `100`, and `pwm_verified` and `system_color_control_requested` are always `true`. An effect that is stopped reports an error, not a result. The visualizer runs until it is stopped, so it always reports an error.
 
 ### Dry runs
 
@@ -191,7 +227,7 @@ $ magsafe --json --dry-run led blink alternate -c 6 -i 250
 {"ok":true,"command":"led blink","dry_run":true,"device_calls":0,"color":"alternate","count":6,"interval_ms":250,"preparation_ms":2700,"duration_ms":5700}
 ```
 
-Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`.
+Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`. `led stream` adds `max_rate_hz`, and `visualizer` adds `preview` and `frame_rate_hz`. Both add `preparation_ms` and a `duration_ms` of `null`, except for a preview.
 
 ### Exit codes
 
@@ -199,8 +235,8 @@ Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, an
 | --- | --- |
 | `0` | Success |
 | `1` | Device, permission, or lock error |
-| `2` | Invalid command, option, or value |
-| `128 + n` | Effect stopped by signal `n` (`130` for Ctrl-C) |
+| `2` | Invalid command, option, or value, including an invalid `led stream` line |
+| `128 + n` | Effect, stream, or visualizer stopped by signal `n` (`130` for Ctrl-C) |
 
 A failed command can leave a change partly applied. Run `magsafe reset` to restore the defaults. Errors that sudo reports itself are plain text on standard error, even with `--json`.
 
@@ -208,14 +244,19 @@ A failed command can leave a change partly applied. Run `magsafe reset` to resto
 
 - **Color:** the Mac's SMC key `ACLC` selects auto, off, green, or amber.
 - **Brightness and diagnostics:** fixed messages go to the cable through the MagSafe port's AppleHPM controller. The transport accepts only the cable's version, security, and diagnostic addresses. There is no raw command access.
-- **Firmware check:** diagnostics, brightness, and effects run only when the cable reports firmware exactly 3.2.0. `firmware version` and `led set` work with any version.
+- **Firmware check:** diagnostics, brightness, effects, and streams run only when the cable reports firmware exactly 3.2.0. `firmware version` and `led set` work with any version.
+- **Visualizer:** a Core Audio process tap captures system audio, and the analysis runs without root. Only brightness values reach the root `led stream` helper. The permission check uses private TCC functions, and is skipped if they are missing.
 
-There is no firmware flashing, no raw memory or PWM access, no security or calibration writes, and no arbitrary patterns, RGB colors, or factory reset.
+There is no firmware flashing, no raw memory or PWM access, no security or calibration writes, and no RGB colors or factory reset. `led stream` allows any brightness pattern in one color, at most 40 changes a second.
 
 | Source | Role |
 | --- | --- |
 | [`src/main.c`](src/main.c) | Argument parsing, sudo, locking, and output |
-| [`src/led.c`](src/led.c) | Brightness, blink, fade, and reset |
+| [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, and reset |
+| [`src/stream.c`](src/stream.c) | `led stream` input parsing |
+| [`src/visualizer.c`](src/visualizer.c) | Visualizer frame loop and latency delay |
+| [`src/analysis.c`](src/analysis.c) | Bass filter, automatic gain, and beat detection |
+| [`src/audio.m`](src/audio.m) | System audio capture with a Core Audio process tap (Objective-C) |
 | [`src/firmware.c`](src/firmware.c) | Cable firmware commands |
 | [`src/hpm.c`](src/hpm.c) | AppleHPM transport (private interface) |
 | [`src/apple-smc.c`](src/apple-smc.c) | SMC light-mode key, an original byte-buffer implementation |
@@ -231,17 +272,21 @@ Earlier versions of the code produced these results on that setup:
 - A timed alternate blink completed. Afterwards, both scales were back at their 100% baseline and calibration was unchanged at `[535, 655, 502, 813]`.
 - In 340 preparation timing trials, the 450 ms dark preparation passed its PWM checks.
 
-The current code has passed only the dry-run tests. Not yet verified on hardware:
+The current code has passed only the dry-run and unit tests. Not yet verified on hardware:
 
 - complete blink and fade sequences
+- `led stream` and the visualizer driving the cable, including how fast the cable accepts brightness changes
+- sudo passing the visualizer's pipe through to `led stream`
 - signal cleanup
 - visible light output
+
+The visualizer's audio capture has been tested only up to creating the tap and capture device. On the test Mac the terminal had no System Audio Recording permission, so no audio arrived. The parent and helper process handling was tested with a stand-in helper.
 
 ## Development
 
 ```sh
 make          # build build/magsafe
-make test     # run CLI tests (no cable or sudo needed)
+make test     # run unit and CLI tests (no cable, audio, or sudo needed)
 make format   # format sources with clang-format
 make clean    # remove build output
 ```

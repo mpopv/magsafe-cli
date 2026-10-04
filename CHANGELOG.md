@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- `visualizer` pulses the light to whatever the Mac is playing. It follows the
+  bass, flashes on kick drums and other sharp rises, and adjusts to quiet and
+  loud music. It captures system audio with a Core Audio process tap (macOS
+  14.2 or later) and needs System Audio Recording permission for the terminal
+  app. Audio capture runs without root; only brightness values reach a root
+  `led stream` helper.
+- `visualizer --preview` shows the levels in the terminal, without the cable or
+  sudo.
+- `led stream <color>` sets brightness from percentages read one per line on
+  standard input, at most 40 times a second, and resets at the end of input.
+- `capabilities` lists `brightness-stream` and `visualizer`, and no longer lists
+  `arbitrary-patterns` as unavailable.
+- `make test` also runs unit tests of the visualizer's analysis and the stream
+  input parser.
+- Not yet verified on the cable or with captured audio. See Compatibility in the
+  README.
+
 ## [0.6.0] - 2026-10-04
 
 First release.

@@ -1,22 +1,38 @@
 CFLAGS ?= -O2 -Wall -Wextra
-LDLIBS = -framework IOKit -framework CoreFoundation
+LDLIBS = -framework IOKit -framework CoreFoundation -framework CoreAudio -framework Foundation
 PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man/man1
 ZSHDIR = $(PREFIX)/share/zsh/site-functions
 
-SOURCES = $(wildcard src/*.c)
+C_SOURCES = $(wildcard src/*.c)
+OBJC_SOURCES = $(wildcard src/*.m)
 HEADERS = $(wildcard src/*.h)
+OBJECTS = $(C_SOURCES:src/%.c=build/%.o) $(OBJC_SOURCES:src/%.m=build/%.o)
+# The parts that need no hardware, audio, or sudo, for the unit tests.
+UNIT_SOURCES = tests/unit.c src/analysis.c src/stream.c
 
 .PHONY: all test install uninstall format clean
 
 all: build/magsafe
 
-build/magsafe: $(SOURCES) $(HEADERS)
+build/%.o: src/%.c $(HEADERS)
 	@mkdir -p build
-	$(CC) -std=c11 $(CFLAGS) $(LDFLAGS) $(SOURCES) $(LDLIBS) -o $@
+	$(CC) -std=c11 $(CFLAGS) -c $< -o $@
 
-test: build/magsafe
+build/%.o: src/%.m $(HEADERS)
+	@mkdir -p build
+	$(CC) -fobjc-arc $(CFLAGS) -c $< -o $@
+
+build/magsafe: $(OBJECTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
+
+build/unit-test: $(UNIT_SOURCES) $(HEADERS)
+	@mkdir -p build
+	$(CC) -std=c11 $(CFLAGS) $(LDFLAGS) -Isrc $(UNIT_SOURCES) -o $@
+
+test: build/magsafe build/unit-test
+	build/unit-test
 	sh tests/cli.sh build/magsafe
 
 install: build/magsafe
@@ -30,7 +46,7 @@ uninstall:
 	  "$(DESTDIR)$(ZSHDIR)/_magsafe"
 
 format:
-	xcrun clang-format -i $(SOURCES) $(HEADERS)
+	xcrun clang-format -i $(C_SOURCES) $(OBJC_SOURCES) $(HEADERS) tests/*.c
 
 clean:
 	rm -rf build

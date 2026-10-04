@@ -16,6 +16,7 @@ _magsafe() {
   _arguments -C \
     '--json[print results and errors as JSON]' \
     '(-n --dry-run)'{-n,--dry-run}'[print the plan without touching hardware]' \
+    '--preview[visualizer: show levels in the terminal instead of on the light]' \
     '(- *)'{-h,--help}'[show help]' \
     '(- *)--version[show the version]' \
     $effect_options \
@@ -27,8 +28,9 @@ _magsafe() {
       commands=(
         'status:show firmware, security flags, and light state'
         'reset:restore 100% brightness and macOS color control'
-        'led:set, dim, blink, fade, or read the light'
+        'led:set, dim, blink, fade, stream, or read the light'
         'firmware:read cable firmware data'
+        'visualizer:pulse the light to the audio that is playing'
         'capabilities:list supported and unavailable functions'
         'version:show the magsafe version'
         'help:show help'
@@ -46,18 +48,22 @@ _magsafe() {
               'fade-in:ramp up, then switch off'
               'fade-out:switch on, then ramp down'
               'fade:ramp up, then ramp down'
+              'stream:set brightness from lines on standard input'
               'get:show the light mode and PWM output'
             )
             _describe -t commands 'led command' commands && ret=0
           elif (( CURRENT == 3 )); then
             case $line[2] in
               set) _values mode auto off green amber && ret=0 ;;
-              brightness|fade|fade-in|fade-out) _values color green amber && ret=0 ;;
+              brightness|fade|fade-in|fade-out|stream) _values color green amber && ret=0 ;;
               blink) _values color green amber alternate && ret=0 ;;
             esac
           elif [[ $line[2] == brightness && CURRENT -eq 4 ]]; then
             _message 'percent (0-100)' && ret=0
           fi
+          ;;
+        visualizer)
+          (( CURRENT == 2 )) && _values color green amber && ret=0
           ;;
         firmware)
           if (( CURRENT == 2 )); then

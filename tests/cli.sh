@@ -72,6 +72,13 @@ expect 0 'dry_run:      true
 device_calls: 0
 color:        amber
 percent:      40' -n led brightness amber 40
+expect 0 "{$dry:\"led stream\",\"dry_run\":true,\"device_calls\":0,\"color\":\"green\",\"max_rate_hz\":40,\"preparation_ms\":450,\"duration_ms\":null}" \
+  --json -n led stream green
+expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"green\",\"preview\":false,\"frame_rate_hz\":30,\"preparation_ms\":450,\"duration_ms\":null}" \
+  --json -n visualizer
+expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"amber\",\"preview\":true,\"frame_rate_hz\":30}" \
+  --json -n visualizer amber --preview
+expect 0 '{"ok":true,*"supported":*"brightness-stream","visualizer"*"unavailable":*}' --json capabilities
 
 # Usage errors
 expect_error "unknown command 'spin'" spin
@@ -94,6 +101,15 @@ expect_error "--duration-ms applies only to fade commands" led blink green -d 10
 expect_error "blink and fade options do not apply to 'status'" status -c 3
 expect_error "--count given more than once" led blink green -c 3 --count 4
 expect_error "option '--count' needs a value" led blink green --count
+expect_error "usage: magsafe led stream <color>" led stream
+expect_error "invalid color 'alternate' (expected green or amber)" led stream alternate
+expect_error "blink and fade options do not apply to 'led stream'" led stream green -i 200
+expect_error "invalid color 'red' (expected green or amber)" visualizer red
+# Brackets are escaped because expected output is a shell pattern.
+expect_error "usage: magsafe visualizer \\[<color>\\] \\[--preview\\]" visualizer green amber
+expect_error "blink and fade options do not apply to 'visualizer'" visualizer -c 3
+expect_error "--preview applies only to 'visualizer'" led stream green --preview
+expect_error "--preview applies only to 'visualizer'" status --preview
 expect_error "invalid option '--bogus'" --bogus status
 expect 2 '{"ok":false,"error":"invalid option '"'"'--bogus'"'"'"}' -n --bogus status --json
 expect 2 '' -n spin

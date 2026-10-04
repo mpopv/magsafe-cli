@@ -3,16 +3,21 @@
 
 #include "led.h"
 #include "error.h"
+#include "stream.h"
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define NS_PER_MS UINT64_C(1000000)
 #define NS_PER_SECOND UINT64_C(1000000000)
 #define RAMP_STEP_MS 50u
 #define VERIFY_POLL_MS 100u
 #define VERIFY_TIMEOUT_MS 2000u
+#define STREAM_CHECK_MS 5000u
+#define STREAM_WAKE_MS 100u /* longest wait, so a stop signal is seen promptly */
 
 volatile sig_atomic_t led_stop_signal;
 
@@ -170,4 +175,74 @@ int led_run(FwClient *fw, SmcClient *smc, const LedEffect *effect, char *error, 
   /* Cleanup ignores the stop signal so that it always runs. */
   if (led_reset(fw, smc, error, size)) return -1;
   return result ? -1 : interrupted(error, size);
+}
+
+/* Fail if the cable no longer drives color, for example because macOS
+ * changed the light while a stream ran. */
+static int check_color(FwClient *fw, FwColor color, char *error, size_t size) {
+  static const char *const names[] = {"off", "amber", "green"};
+  FwLedState state;
+  if (fw_read_led(fw, &state, error, size)) return -1;
+  if (state.color != color + 1u)
+    return fail(error, size, "the cable switched to %s; macOS or another program changed the light",
+                names[state.color]);
+  return 0;
+}
+
+int led_stream(FwClient *fw, SmcClient *smc, FwColor color, int input, LedStreamResult *result,
+               char *error, size_t size) {
+  *result = (LedStreamResult){0};
+  FwLedState state;
+  /* This read also checks the firmware version before anything changes. */
+  if (fw_read_led(fw, &state, error, size)) return -1;
+  StreamParser parser = {0};
+  unsigned current = 0; /* prepare leaves both scales at 0% */
+  uint64_t interval = NS_PER_SECOND / LED_STREAM_HZ, next_write = 0;
+  int status = prepare(fw, smc, color, error, size);
+  uint64_t next_check = now_ns() + STREAM_CHECK_MS * NS_PER_MS;
+  bool ended = false;
+  while (!status && !ended) {
+    /* Wait for input, for the next allowed write, or for the next check. */
+    uint64_t now = now_ns(), deadline = next_check;
+    if (parser.have_value && parser.value != current && next_write < deadline)
+      deadline = next_write;
+    uint64_t wait = deadline > now ? deadline - now : 0;
+    if (wait > STREAM_WAKE_MS * NS_PER_MS) wait = STREAM_WAKE_MS * NS_PER_MS;
+    struct pollfd descriptor = {.fd = input, .events = POLLIN};
+    int ready = poll(&descriptor, 1, (int)((wait + NS_PER_MS - 1) / NS_PER_MS));
+    if ((status = interrupted(error, size))) break;
+    if (ready < 0 && errno != EINTR && errno != EAGAIN) {
+      status = fail(error, size, "cannot wait for input: %s", strerror(errno));
+      break;
+    }
+    if (ready > 0) {
+      char buffer[4096];
+      ssize_t count = read(input, buffer, sizeof(buffer));
+      if (count < 0 && errno != EINTR && errno != EAGAIN) {
+        status = fail(error, size, "cannot read input: %s", strerror(errno));
+      } else if (count >= 0) {
+        ended = count == 0;
+        status = ended ? stream_finish(&parser, error, size)
+                       : stream_feed(&parser, buffer, (size_t)count, error, size);
+        result->invalid_input = status != 0;
+      }
+    }
+
+    /* Ending input skips its last value, since the reset follows at once. */
+    now = now_ns();
+    if (!status && !ended && parser.have_value && parser.value != current && now >= next_write) {
+      status = set_brightness(fw, color, parser.value, error, size);
+      current = parser.value;
+      next_write = now + interval;
+      result->writes++;
+    }
+    if (!status && !ended && now >= next_check) {
+      status = check_color(fw, color, error, size);
+      next_check = now_ns() + STREAM_CHECK_MS * NS_PER_MS;
+    }
+  }
+  result->values = parser.values;
+  /* Cleanup ignores the stop signal so that it always runs. */
+  if (led_reset(fw, smc, error, size)) return -1;
+  return status ? -1 : interrupted(error, size);
 }

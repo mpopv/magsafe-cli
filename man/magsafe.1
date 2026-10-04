@@ -65,6 +65,16 @@ Ramp up, switch off, then stay dark for the interval.
 Switch on, ramp down, then stay dark for the interval.
 .It Cm led fade Ar color
 Ramp up, ramp down, then stay dark for the interval.
+.It Cm led stream Ar color
+Light
+.Cm green
+or
+.Cm amber
+at the brightness percentages read from standard input, one per line, until
+the input ends.
+Spaces around a number are allowed and blank lines are skipped.
+Only the newest value is used, at most 40 times a second, and the color is
+checked every 5 seconds.
 .It Cm led get
 Show the light mode, the two PWM outputs, and the color selector.
 .It Cm firmware version
@@ -73,6 +83,20 @@ Show the cable firmware version.
 Show the configuration-setter lock and signature-skip flags.
 .It Cm firmware calibration
 Show the four stored light calibration values.
+.It Cm visualizer Op Ar color
+Pulse
+.Cm green
+(the default) or
+.Cm amber
+to whatever the Mac is playing, until interrupted.
+The light follows the bass and flashes to full brightness on sharp rises such
+as a kick drum, with automatic gain.
+Audio capture and analysis run as the invoking user; only
+.Cm led stream
+runs through
+.Xr sudo 8 .
+Requires macOS 14.2 or later and System Audio Recording permission for the
+terminal app.
 .It Cm capabilities
 List supported and unavailable functions.
 .It Cm version
@@ -95,6 +119,8 @@ on completion, error, or
 or
 .Dv SIGHUP .
 Fades check the PWM output at the top and bottom of every cycle.
+Streams and the visualizer prepare their color the same way and also end with
+.Cm reset .
 .Pp
 Diagnostics, brightness, and effects require cable firmware 3.2.0.
 .Sh OPTIONS
@@ -119,6 +145,11 @@ Blink on and off time, or dark time after each fade cycle: 100 to 10000
 (default 500).
 .It Fl d , Fl -duration-ms Ar ms
 Time for each fade ramp: 500 to 60000 (default 1000).
+.It Fl -preview
+Visualizer only: draw the levels on standard error instead of driving the
+light, without the cable or
+.Xr sudo 8 .
+When standard error is not a terminal, print one percentage per line.
 .El
 .Sh FILES
 .Bl -tag -width Ds
@@ -132,9 +163,11 @@ Success.
 .It 1
 Device, permission, or lock error.
 .It 2
-Invalid command, option, or value.
+Invalid command, option, or value, including an invalid
+.Cm led stream
+line.
 .It 128 + Ar n
-An effect stopped by signal
+An effect, stream, or visualizer stopped by signal
 .Ar n ,
 such as 130 for Ctrl-C.
 .El
@@ -147,6 +180,15 @@ Alternate green and amber six times, 250 ms each way:
 .Pp
 Fade amber up and down until Ctrl-C:
 .Dl $ magsafe led fade amber
+.Pp
+Pulse amber to the music until Ctrl-C:
+.Dl $ magsafe visualizer amber
+.Pp
+Check audio capture without the cable:
+.Dl $ magsafe visualizer --preview
+.Pp
+Ramp green up over 2 seconds from a script:
+.Dl $ for p in $(seq 0 5 100); do echo $p; sleep 0.1; done | magsafe led stream green
 .Pp
 Show the plan of an effect as JSON, without touching hardware:
 .Dl $ magsafe --json --dry-run led fade-in green -c 3 -d 2000
@@ -161,3 +203,10 @@ Return the light to macOS:
 .Nm
 uses private Apple interfaces and has been tested on one Mac with one cable
 firmware version.
+.Pp
+macOS keeps System Audio Recording permission per app, and for
+.Nm
+that app is the terminal.
+Terminal apps that don't declare audio recording get no prompt; add them under
+System Audio Recording Only in System Settings > Privacy & Security > Screen &
+System Audio Recording.

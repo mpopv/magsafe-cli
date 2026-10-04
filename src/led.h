@@ -14,6 +14,7 @@
 
 #define LED_PREPARE_MS 450u /* dark pause after each color selection */
 #define LED_INFINITE 0u     /* effect count that repeats until stopped */
+#define LED_STREAM_HZ 40u   /* most brightness writes per second in a stream */
 
 typedef enum { LED_BLINK, LED_FADE_IN, LED_FADE_OUT, LED_FADE } LedPattern;
 
@@ -43,5 +44,18 @@ int led_reset(FwClient *fw, SmcClient *smc, char *error, size_t size);
 /* Run a blink or fade, then led_reset. Brightness is checked at each fade peak
  * and trough. */
 int led_run(FwClient *fw, SmcClient *smc, const LedEffect *effect, char *error, size_t size);
+
+typedef struct {
+  unsigned long values; /* valid values read */
+  unsigned long writes; /* brightness changes sent to the cable */
+  bool invalid_input;   /* the stream stopped at an invalid line */
+} LedStreamResult;
+
+/* Light color at the brightness percentages read one per line from input,
+ * until end of input or a stop signal, then led_reset. Only the newest value
+ * is used, at most LED_STREAM_HZ times a second, and the selected color is
+ * checked every few seconds. */
+int led_stream(FwClient *fw, SmcClient *smc, FwColor color, int input, LedStreamResult *result,
+               char *error, size_t size);
 
 #endif
