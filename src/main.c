@@ -54,13 +54,13 @@ static const char help_text[] =
     "      --version                 Show the magsafe version\n"
     "\n"
     "Blink and fade options:\n"
-    "  -c, --count <n>               Cycles, 1-300 or infinite (default 4)\n"
+    "  -c, --count <n>               Cycles, 1-300 or infinite (default infinite)\n"
     "  -i, --interval-ms <ms>        Blink on/off time, or dark time after each fade\n"
     "                                cycle, 100-10000 (default 500)\n"
     "  -d, --duration-ms <ms>        Fade ramp time, 500-60000 (default 1000)\n"
     "\n"
-    "Fades take green or amber. Finite effects must fit in 60 seconds; stop\n"
-    "infinite ones with Ctrl-C. Every effect finishes with a reset.\n"
+    "Fades take green or amber. Effects run until Ctrl-C unless --count is given;\n"
+    "finite runs must fit in 60 seconds. Every effect finishes with a reset.\n"
     "Diagnostics, brightness, and effects require cable firmware " FW_SUPPORTED_VERSION_TEXT ".\n"
     "Hardware commands run through sudo, which may ask for your password.\n";
 
@@ -332,7 +332,7 @@ static int parse_effect(Options *o, const char *color, const char *count, const 
   if (o->count != LED_INFINITE && total_ms(o) > MAX_TOTAL_MS)
     return fail(error, size,
                 "planned run time is %lu ms; finite effects are limited to %u ms "
-                "(use --count infinite to run until stopped)",
+                "(omit --count to run until stopped)",
                 total_ms(o), MAX_TOTAL_MS);
   return 0;
 }
@@ -354,7 +354,8 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
       {"duration-ms", required_argument, NULL, 'd'},
       {NULL, 0, NULL, 0},
   };
-  *o = (Options){.command = CMD_HELP, .count = 4, .interval_ms = 500, .duration_ms = 1000};
+  *o = (Options){
+      .command = CMD_HELP, .count = LED_INFINITE, .interval_ms = 500, .duration_ms = 1000};
   const char *count = NULL, *interval = NULL, *duration = NULL;
   bool help = false, version = false;
 

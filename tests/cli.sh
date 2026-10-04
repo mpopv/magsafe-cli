@@ -52,8 +52,10 @@ expect 0 "{$dry:\"led set\",\"dry_run\":true,\"device_calls\":0,\"color\":\"off\
   --json -n led set off
 expect 0 "{$dry:\"led brightness\",\"dry_run\":true,\"device_calls\":0,\"color\":\"amber\",\"percent\":40}" \
   --json -n led brightness amber 40
-expect 0 "{$dry:\"led blink\",\"dry_run\":true,\"device_calls\":0,\"color\":\"green\",\"count\":4,\"interval_ms\":500,\"preparation_ms\":450,\"duration_ms\":4450}" \
+expect 0 "{$dry:\"led blink\",\"dry_run\":true,\"device_calls\":0,\"color\":\"green\",\"count\":\"infinite\",\"interval_ms\":500,\"preparation_ms\":450,\"duration_ms\":null}" \
   --json -n led blink green
+expect 0 "{$dry:\"led blink\",\"dry_run\":true,\"device_calls\":0,\"color\":\"green\",\"count\":4,\"interval_ms\":500,\"preparation_ms\":450,\"duration_ms\":4450}" \
+  --json -n led blink green -c 4
 expect 0 "{$dry:\"led blink\",\"dry_run\":true,\"device_calls\":0,\"color\":\"alternate\",\"count\":6,\"interval_ms\":250,\"preparation_ms\":2700,\"duration_ms\":5700}" \
   --json -n led blink alternate -c 6 -i 250
 expect 0 "{$dry:\"led blink\",\"dry_run\":true,\"device_calls\":0,\"color\":\"alternate\",\"count\":\"infinite\",\"interval_ms\":500,\"preparation_ms\":null,\"duration_ms\":null}" \
@@ -86,7 +88,7 @@ expect_error "invalid color 'blue' (expected green, amber, or alternate)" led bl
 expect_error "invalid --count '0' (expected 1-300 or infinite)" led blink green -c 0
 expect_error "invalid --interval-ms '50' (expected 100-10000)" led blink green -i 50
 expect_error "invalid --duration-ms '100' (expected 500-60000)" led fade green -d 100
-expect_error "planned run time is 60450 ms; finite effects are limited to 60000 ms (use --count infinite to run until stopped)" \
+expect_error "planned run time is 60450 ms; finite effects are limited to 60000 ms (omit --count to run until stopped)" \
   led blink green -c 60
 expect_error "--duration-ms applies only to fade commands" led blink green -d 1000
 expect_error "blink and fade options do not apply to 'status'" status -c 3

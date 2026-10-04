@@ -6,7 +6,7 @@ Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS com
 magsafe led set amber                 # solid amber
 magsafe led brightness green 25       # dim green
 magsafe led blink alternate -c 6      # flash green and amber in turn
-magsafe led fade green -c infinite    # breathe until Ctrl-C
+magsafe led fade green               # breathe until Ctrl-C
 magsafe reset                         # hand the light back to macOS
 ```
 
@@ -57,7 +57,7 @@ magsafe [options] <command> [<args>]
 | `-n`, `--dry-run` | Check the command and print its plan without touching hardware |
 | `-h`, `--help` | Show help |
 | `--version` | Show the version |
-| `-c`, `--count <n>` | Blink or fade cycles: 1–300 or `infinite` (default 4) |
+| `-c`, `--count <n>` | Blink or fade cycles: 1–300 or `infinite` (default `infinite`) |
 | `-i`, `--interval-ms <ms>` | Blink on and off time, or dark time after each fade cycle: 100–10000 (default 500) |
 | `-d`, `--duration-ms <ms>` | Time for each fade ramp: 500–60000 (default 1000) |
 
@@ -88,10 +88,10 @@ This sets the color's brightness scale in the cable's RAM, selects that color, a
 ### Blink and fade
 
 ```sh
-magsafe led blink green                   # 4 flashes, 500 ms on and 500 ms off
-magsafe led blink alternate -c 6 -i 250   # green and amber in turn
-magsafe led fade-in amber -c 3 -d 2000    # 2-second rise, then off
-magsafe led fade green -c infinite        # until Ctrl-C
+magsafe led blink green                   # until Ctrl-C: 500 ms on, 500 ms off
+magsafe led blink alternate -c 6 -i 250   # 6 flashes, green and amber in turn
+magsafe led fade-in amber -c 3 -d 2000    # 3 cycles: 2-second rise, then off
+magsafe led fade green                    # until Ctrl-C
 ```
 
 | Command | One cycle | Colors |
@@ -107,7 +107,7 @@ Every effect does the following:
 - Fades change brightness at most 20 times a second. They check the PWM output at the top and bottom of every cycle.
 - When it finishes, fails, or receives Ctrl-C (`SIGINT`, `SIGTERM`, or `SIGHUP`), it runs `reset`. Any brightness you set before the effect is not restored.
 
-A finite effect must be planned to take 60 seconds or less, including preparation:
+An effect repeats until Ctrl-C (exit code 130) or a device error unless you give `--count`. A finite effect must be planned to take 60 seconds or less, including preparation:
 
 | Command | Planned time (ms) |
 | --- | --- |
@@ -115,7 +115,7 @@ A finite effect must be planned to take 60 seconds or less, including preparatio
 | `led fade-in`, `led fade-out` | `450 + count × (duration + interval)` |
 | `led fade` | `450 + count × (2 × duration + interval)` |
 
-Preparation is 450 ms, or `count × 450` ms for `alternate`. Device calls add some time beyond the plan. `--dry-run` shows the planned total. For longer runs, use `--count infinite`. It repeats until Ctrl-C (exit code 130) or a device error.
+Preparation is 450 ms, or `count × 450` ms for `alternate`. Device calls add some time beyond the plan. `--dry-run` shows the planned total. For a longer run, leave out `--count`.
 
 ### Reset
 
@@ -183,7 +183,7 @@ $ magsafe --json --dry-run led blink alternate -c 6 -i 250
 {"ok":true,"command":"led blink","dry_run":true,"device_calls":0,"color":"alternate","count":6,"interval_ms":250,"preparation_ms":2700,"duration_ms":5700}
 ```
 
-Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. With `--count infinite`, `count` is `"infinite"` and unbounded times are `null`.
+Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`.
 
 ### Exit codes
 
