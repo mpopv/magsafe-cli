@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and test
+        run: make test CFLAGS="-O2 -Wall -Wextra -Werror"
+
+      - name: Check that the tag matches the program version
+        run: |
+          version=$(build/magsafe --version | cut -d' ' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match magsafe $version"
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          awk -v version="${GITHUB_REF_NAME#v}" '
+            /^## \[/ { found = index($0, "[" version "]") > 0; next }
+            /^\[.*\]: / { next }
+            found
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no entry for ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+      - name: Update the Homebrew formula
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          key="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          revision=$(git rev-parse HEAD)
+          git clone git@github.com:mpopv/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' -E \
+            -e "s/(tag: +)\"[^\"]*\"/\1\"$GITHUB_REF_NAME\"/" \
+            -e "s/(revision: +)\"[0-9a-f]*\"/\1\"$revision\"/" \
+            Formula/magsafe.rb
+          if git diff --quiet; then
+            echo "Formula already points to $GITHUB_REF_NAME"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "magsafe ${GITHUB_REF_NAME#v}"
+          git push

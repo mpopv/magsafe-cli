@@ -15,7 +15,15 @@ magsafe reset                         # hand the light back to macOS
 
 ## Install
 
-You need a Mac with a MagSafe 3 port, an A2363 cable, and the Xcode Command Line Tools (`xcode-select --install`).
+You need a Mac with a MagSafe 3 port and an A2363 cable.
+
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install mpopv/tap/magsafe
+```
+
+From source, with the Xcode Command Line Tools (`xcode-select --install`):
 
 ```sh
 git clone https://github.com/mpopv/magsafe-cli.git
@@ -23,7 +31,7 @@ cd magsafe-cli
 make install
 ```
 
-This builds `magsafe` and installs it in `~/.local/bin`, which must be on your `PATH`. To install somewhere else, set `PREFIX`, for example `make && sudo make install PREFIX=/usr/local`. Run `make uninstall` with the same `PREFIX` to remove it.
+`make install` puts `magsafe` in `~/.local/bin`, which must be on your `PATH`. It also installs the man page in `~/.local/share/man/man1` and the zsh completion in `~/.local/share/zsh/site-functions`; add that directory to `fpath` to use it. To install somewhere else, set `PREFIX`, for example `make && sudo make install PREFIX=/usr/local`. Run `make uninstall` with the same `PREFIX` to remove it. Homebrew installs the man page and completion automatically.
 
 Connect the cable's USB-C end to a power adapter and its MagSafe end to the Mac.
 
@@ -237,6 +245,15 @@ make test     # run CLI tests (no cable or sudo needed)
 make format   # format sources with clang-format
 make clean    # remove build output
 ```
+
+[CI](.github/workflows/ci.yml) builds with `-Werror`, runs the tests, and checks formatting and the man page on every push to `main` and every pull request.
+
+### Releasing
+
+1. Set `VERSION` in `src/main.c`, and move the `Unreleased` notes in `CHANGELOG.md` under the new version.
+2. Commit, then tag and push: `git tag v0.7.0 && git push origin main v0.7.0`.
+
+The [release workflow](.github/workflows/release.yml) then tests the tag and checks that it matches `magsafe --version`. It publishes a GitHub release with the changelog notes and points the Homebrew formula in [mpopv/homebrew-tap](https://github.com/mpopv/homebrew-tap) at the new tag.
 
 ## License
 

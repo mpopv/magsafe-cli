@@ -1,0 +1,163 @@
+.Dd October 4, 2026
+.Dt MAGSAFE 1
+.Os
+.Sh NAME
+.Nm magsafe
+.Nd control the light on an Apple MagSafe 3 cable
+.Sh SYNOPSIS
+.Nm
+.Op Fl -json
+.Op Fl n
+.Ar command
+.Op Ar args ...
+.Nm
+.Fl h | -version
+.Sh DESCRIPTION
+.Nm
+controls the light on Apple's USB-C to MagSafe 3 cable (A2363) and reads the
+cable's firmware state.
+Color comes from the Mac's SMC; brightness and diagnostics come from fixed
+messages to the cable.
+It changes only the cable's RAM brightness and the Mac's light color setting,
+never firmware or stored calibration.
+.Pp
+Commands that touch hardware run
+.Nm
+again through
+.Xr sudo 8 ,
+which may ask for a password.
+Only one such command can run at a time.
+Options can appear before or after the command.
+.Sh COMMANDS
+.Bl -tag -width Ds
+.It Cm status
+Show the firmware version, security flags, and light state.
+.It Cm reset
+Set both brightness scales to 100% and return color control to macOS.
+Every step is attempted even if another fails.
+.It Cm led set Ar mode
+Set the light to
+.Cm auto ,
+.Cm off ,
+.Cm green ,
+or
+.Cm amber .
+.Cm auto
+does not change brightness.
+.It Cm led brightness Ar color percent
+Light
+.Cm green
+or
+.Cm amber
+at 0 to 100% brightness, then wait up to 2 seconds for the cable's PWM output
+to match.
+.It Cm led blink Ar color
+Switch between 100% and 0%, once per interval.
+.Ar color
+is
+.Cm green ,
+.Cm amber ,
+or
+.Cm alternate .
+.It Cm led fade-in Ar color
+Ramp up, switch off, then stay dark for the interval.
+.It Cm led fade-out Ar color
+Switch on, ramp down, then stay dark for the interval.
+.It Cm led fade Ar color
+Ramp up, ramp down, then stay dark for the interval.
+.It Cm led get
+Show the light mode, the two PWM outputs, and the color selector.
+.It Cm firmware version
+Show the cable firmware version.
+.It Cm firmware security
+Show the configuration-setter lock and signature-skip flags.
+.It Cm firmware calibration
+Show the four stored light calibration values.
+.It Cm capabilities
+List supported and unavailable functions.
+.It Cm version
+Show the
+.Nm
+version.
+.It Cm help
+Show a usage summary.
+.El
+.Pp
+Blink and fade effects repeat until interrupted unless
+.Fl -count
+is given.
+They select their color while dark, wait 450 ms for the cable's own color
+transition, and end with
+.Cm reset
+on completion, error, or
+.Dv SIGINT ,
+.Dv SIGTERM ,
+or
+.Dv SIGHUP .
+Fades check the PWM output at the top and bottom of every cycle.
+.Pp
+Diagnostics, brightness, and effects require cable firmware 3.2.0.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl -json
+Print the result, or the error, as one JSON object on standard output.
+Commands that change the light print nothing on success without this option.
+.It Fl n , Fl -dry-run
+Check the command and print its plan without touching hardware or asking for a
+password.
+.It Fl h , Fl -help
+Show a usage summary.
+.It Fl -version
+Show the version.
+.It Fl c , Fl -count Ar n
+Number of blink or fade cycles: 1 to 300, or
+.Cm infinite
+(the default).
+A finite effect must be planned to take 60 seconds or less.
+.It Fl i , Fl -interval-ms Ar ms
+Blink on and off time, or dark time after each fade cycle: 100 to 10000
+(default 500).
+.It Fl d , Fl -duration-ms Ar ms
+Time for each fade ramp: 500 to 60000 (default 1000).
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa /var/run/magsafe-cli.lock
+Lock held while a hardware command runs.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 1
+Device, permission, or lock error.
+.It 2
+Invalid command, option, or value.
+.It 128 + Ar n
+An effect stopped by signal
+.Ar n ,
+such as 130 for Ctrl-C.
+.El
+.Sh EXAMPLES
+Set a dim green light:
+.Dl $ magsafe led brightness green 25
+.Pp
+Alternate green and amber six times, 250 ms each way:
+.Dl $ magsafe led blink alternate -c 6 -i 250
+.Pp
+Fade amber up and down until Ctrl-C:
+.Dl $ magsafe led fade amber
+.Pp
+Show the plan of an effect as JSON, without touching hardware:
+.Dl $ magsafe --json --dry-run led fade-in green -c 3 -d 2000
+.Pp
+Return the light to macOS:
+.Dl $ magsafe reset
+.Sh SEE ALSO
+.Xr sudo 8
+.Pp
+.Lk https://github.com/mpopv/magsafe-cli
+.Sh CAVEATS
+.Nm
+uses private Apple interfaces and has been tested on one Mac with one cable
+firmware version.

@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test
+        run: make test CFLAGS="-O2 -Wall -Wextra -Werror"
+      - name: Check formatting
+        run: xcrun clang-format --dry-run --Werror src/*.c src/*.h
+      - name: Lint man page
+        run: mandoc -T lint -W warning man/magsafe.1

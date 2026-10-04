@@ -1,0 +1,78 @@
+#compdef magsafe
+
+# zsh completion for magsafe.
+
+_magsafe() {
+  local curcontext=$curcontext state line ret=1
+  local -a commands effect_options
+  local -A opt_args
+
+  effect_options=(
+    '(-c --count)'{-c+,--count=}'[number of cycles]:count:(infinite)'
+    '(-i --interval-ms)'{-i+,--interval-ms=}'[on/off or dark time in ms (100-10000)]:milliseconds'
+    '(-d --duration-ms)'{-d+,--duration-ms=}'[fade ramp time in ms (500-60000)]:milliseconds'
+  )
+
+  _arguments -C \
+    '--json[print results and errors as JSON]' \
+    '(-n --dry-run)'{-n,--dry-run}'[print the plan without touching hardware]' \
+    '(- *)'{-h,--help}'[show help]' \
+    '(- *)--version[show the version]' \
+    $effect_options \
+    '1:command:->command' \
+    '*::argument:->argument' && ret=0
+
+  case $state in
+    command)
+      commands=(
+        'status:show firmware, security flags, and light state'
+        'reset:restore 100% brightness and macOS color control'
+        'led:set, dim, blink, fade, or read the light'
+        'firmware:read cable firmware data'
+        'capabilities:list supported and unavailable functions'
+        'version:show the magsafe version'
+        'help:show help'
+      )
+      _describe -t commands 'magsafe command' commands && ret=0
+      ;;
+    argument)
+      case $line[1] in
+        led)
+          if (( CURRENT == 2 )); then
+            commands=(
+              'set:set the light mode'
+              'brightness:light a color at 0-100% brightness'
+              'blink:blink a color'
+              'fade-in:ramp up, then switch off'
+              'fade-out:switch on, then ramp down'
+              'fade:ramp up, then ramp down'
+              'get:show the light mode and PWM output'
+            )
+            _describe -t commands 'led command' commands && ret=0
+          elif (( CURRENT == 3 )); then
+            case $line[2] in
+              set) _values mode auto off green amber && ret=0 ;;
+              brightness|fade|fade-in|fade-out) _values color green amber && ret=0 ;;
+              blink) _values color green amber alternate && ret=0 ;;
+            esac
+          elif [[ $line[2] == brightness && CURRENT -eq 4 ]]; then
+            _message 'percent (0-100)' && ret=0
+          fi
+          ;;
+        firmware)
+          if (( CURRENT == 2 )); then
+            commands=(
+              'version:show the cable firmware version'
+              'security:show the setter lock and signature-skip flags'
+              'calibration:show the stored calibration values'
+            )
+            _describe -t commands 'firmware command' commands && ret=0
+          fi
+          ;;
+      esac
+      ;;
+  esac
+  return ret
+}
+
+_magsafe "$@"
