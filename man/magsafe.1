@@ -207,6 +207,9 @@ firmware version.
 macOS keeps System Audio Recording permission per app, and for
 .Nm
 that app is the terminal.
-Terminal apps that don't declare audio recording get no prompt; add them under
-System Audio Recording Only in System Settings > Privacy & Security > Screen &
-System Audio Recording.
+macOS asks for it the first time
+.Cm visualizer
+runs.
+If it was denied, or the terminal app gets no prompt, allow the app, or add it
+under System Audio Recording Only, in System Settings > Privacy & Security >
+Screen & System Audio Recording.

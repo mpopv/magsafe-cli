@@ -140,7 +140,7 @@ magsafe visualizer --preview    # levels in the terminal; no cable or sudo
 The light follows whatever the Mac is playing. It brightens with the bass (40–160 Hz) and flashes to full brightness on each kick drum or other sharp rise in the bass. Automatic gain gives quiet and loud music the same range, and silence leaves the light dark. The color stays the same for the whole run, because a color change takes the cable 450 ms in the dark.
 
 - **Audio:** a Core Audio process tap captures a mono mix of everything the Mac plays, without a virtual audio driver. This needs macOS 14.2 or later.
-- **Permission:** macOS grants System Audio Recording permission per app, and for a command-line tool that app is your terminal. If the app has never been asked, `magsafe` asks macOS to request permission. Terminal and many other terminal apps don't declare that they record audio, so macOS shows no prompt, and `magsafe` stops with instructions. Add the terminal app under **System Audio Recording Only** in System Settings > Privacy & Security > Screen & System Audio Recording, then run `magsafe` again.
+- **Permission:** macOS grants System Audio Recording permission per app, and for a command-line tool that app is your terminal. On the first run, macOS asks whether to allow it. If you deny it, or your terminal app gets no prompt, `magsafe` stops with instructions: allow the app, or add it under **System Audio Recording Only**, in System Settings > Privacy & Security > Screen & System Audio Recording, then run `magsafe` again.
 - **Privileges:** audio capture and analysis run as you, and never as root. They send one brightness per frame to `magsafe led stream`, which runs through sudo. The permission check comes before sudo asks for a password.
 - **Timing:** 30 frames a second. Each frame is held back by the output device's reported latency, minus about 25 ms for the light itself, so that the light changes when you hear the sound. This matters most with Bluetooth headphones.
 - **Stopping:** Ctrl-C (`SIGINT`, `SIGTERM`, or `SIGHUP`) resets the light. As with an infinite effect, the stop is reported as an error, with exit code 130 for Ctrl-C.
@@ -280,7 +280,7 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 - signal cleanup
 - visible light output
 
-The visualizer's audio capture has been tested only up to creating the tap and capture device. On the test Mac the terminal had no System Audio Recording permission, so no audio arrived. The parent and helper process handling was tested with a stand-in helper.
+In a user's run of the visualizer, macOS prompted for System Audio Recording permission and the visualizer worked after the prompts were accepted, with no changes in System Settings. The parent and helper process handling was also tested with a stand-in helper.
 
 ## Development
 
