@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-04
+
 - The visualizer flashes with the kick drum and falls to a dim glow between
   kicks, even in loud, heavily limited songs, which used to keep the light
   near full brightness. It finds beats as rises in three bass bands that stand
@@ -50,6 +52,7 @@ First release.
 - `--json` output, `--dry-run` plans, and distinct exit codes for scripting.
 - Man page and zsh completion.
 
-[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/mpopv/magsafe-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mpopv/magsafe-cli/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mpopv/magsafe-cli/releases/tag/v0.6.0

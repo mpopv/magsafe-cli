@@ -23,7 +23,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define VERSION "0.7.0"
+#define VERSION "0.8.0"
 #define LOCK_PATH "/var/run/magsafe-cli.lock"
 #define MAX_COUNT 300u
 #define MAX_TOTAL_MS 60000u
