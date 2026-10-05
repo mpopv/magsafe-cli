@@ -3,10 +3,12 @@
 
 /* Unit tests for the parts that need no cable, audio, or sudo: the
  * visualizer's analysis, the 'led stream' input parser, the timer's
- * schedule, and Morse code. */
+ * schedule, Morse code, settings, and the daemon protocol. */
 
 #include "analysis.h"
 #include "morse.h"
+#include "protocol.h"
+#include "settings.h"
 #include "stream.h"
 #include "timer.h"
 #include <math.h>
@@ -387,12 +389,105 @@ static void test_morse(void) {
   check(morse_units("EE") == 5, "morse: EE is %lu units, expected 5", morse_units("EE"));
 }
 
+/* Settings */
+
+static void expect_settings(const char *text, unsigned dim, SmcLedMode color, const char *message) {
+  Settings settings = {7, SMC_LED_OFF};
+  char error[256] = "";
+  int result = settings_parse(text, &settings, error, sizeof(error));
+  if (message)
+    check(result && !strcmp(error, message), "settings '%s': got error '%s', expected '%s'", text,
+          error, message);
+  else
+    check(!result && settings.dim == dim && settings.color == color,
+          "settings '%s': got dim %u color %d (error '%s'), expected %u %d", text, settings.dim,
+          settings.color, error, dim, color);
+}
+
+static void test_settings(void) {
+  expect_settings("", 100, SMC_LED_AUTO, NULL);
+  expect_settings("dim=10\ncolor=green\n", 10, SMC_LED_GREEN, NULL);
+  expect_settings("# comment\n\ncolor=amber", 100, SMC_LED_AMBER, NULL);
+  expect_settings("dim=0\ncolor=off\nfuture=1\n", 0, SMC_LED_OFF, NULL);
+  expect_settings("dim=101\n", 0, 0, "invalid dim '101' in settings (expected 0-100)");
+  expect_settings("dim=-1\n", 0, 0, "invalid dim '-1' in settings (expected 0-100)");
+  expect_settings("color=red\n", 0, 0, "invalid color 'red' in settings");
+  expect_settings("dim\n", 0, 0, "settings line 1 has no '='");
+
+  /* What is written reads back the same. */
+  Settings written = {42, SMC_LED_AMBER}, read = SETTINGS_DEFAULTS;
+  char text[SETTINGS_TEXT_MAX];
+  settings_format(&written, text, sizeof(text));
+  check(!settings_parse(text, &read, NULL, 0) && read.dim == 42 && read.color == SMC_LED_AMBER,
+        "settings: '%s' did not read back", text);
+  Settings defaults = SETTINGS_DEFAULTS;
+  check(settings_are_default(&defaults) && !settings_are_default(&written),
+        "settings: defaults not recognized");
+}
+
+/* Daemon protocol */
+
+static void test_protocol(void) {
+  char *argv[] = {"--json", "morse", "hello world", ""};
+  char bytes[DAEMON_BYTES_MAX], *parsed[DAEMON_ARGS_MAX + 1], error[256] = "";
+  DaemonRequest request;
+  check(!protocol_request(&request, "1.2.3", 4, argv, bytes, sizeof(bytes), error, sizeof(error)) &&
+            !protocol_check(&request, error, sizeof(error)) &&
+            !protocol_arguments(&request, bytes, parsed, error, sizeof(error)),
+        "protocol: round trip failed: %s", error);
+  check(request.argc == 4 && !strcmp(parsed[0], "--json") && !strcmp(parsed[2], "hello world") &&
+            !strcmp(parsed[3], "") && parsed[4] == NULL && !strcmp(request.version, "1.2.3"),
+        "protocol: arguments changed in transit");
+
+  /* Malformed requests are rejected, not read past their end. */
+  DaemonRequest bad = request;
+  bad.magic = 0;
+  check(protocol_check(&bad, NULL, 0) != 0, "protocol: wrong magic accepted");
+  bad = request;
+  bad.length = DAEMON_BYTES_MAX + 1;
+  check(protocol_check(&bad, NULL, 0) != 0, "protocol: oversized request accepted");
+  bad = request;
+  bad.argc = DAEMON_ARGS_MAX + 1;
+  check(protocol_check(&bad, NULL, 0) != 0, "protocol: too many arguments accepted");
+  bad = request;
+  memset(bad.version, 'x', sizeof(bad.version));
+  check(protocol_check(&bad, NULL, 0) != 0, "protocol: unterminated version accepted");
+  bad = request;
+  bad.argc = 5; /* more arguments than the bytes hold */
+  check(protocol_arguments(&bad, bytes, parsed, NULL, 0) != 0,
+        "protocol: missing argument accepted");
+  bad = request;
+  bad.argc = 3; /* bytes left over */
+  check(protocol_arguments(&bad, bytes, parsed, NULL, 0) != 0, "protocol: extra bytes accepted");
+  char unterminated[] = {'a', 'b'};
+  bad = request;
+  bad.argc = 1;
+  bad.length = 2;
+  check(protocol_arguments(&bad, unterminated, parsed, NULL, 0) != 0,
+        "protocol: unterminated argument accepted");
+
+  char *many[DAEMON_ARGS_MAX + 1];
+  for (size_t i = 0; i <= DAEMON_ARGS_MAX; ++i) many[i] = "x";
+  check(protocol_request(&request, "1", DAEMON_ARGS_MAX + 1, many, bytes, sizeof(bytes), NULL, 0),
+        "protocol: too many arguments sent");
+
+  DaemonReply reply;
+  protocol_reply(&reply, "1.2.3", DAEMON_DENIED, "no");
+  check(!protocol_check_reply(&reply, NULL, 0) && reply.status == DAEMON_DENIED &&
+            !strcmp(reply.message, "no"),
+        "protocol: reply round trip failed");
+  reply.status = 99;
+  check(protocol_check_reply(&reply, NULL, 0) != 0, "protocol: unknown status accepted");
+}
+
 int main(void) {
   make_limited_mix();
   test_analysis();
   test_stream();
   test_timer();
   test_morse();
+  test_settings();
+  test_protocol();
   if (failures) {
     printf("%d of %d unit tests failed.\n", failures, tests);
     return 1;

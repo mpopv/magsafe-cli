@@ -1,5 +1,6 @@
 CFLAGS ?= -O2 -Wall -Wextra
-LDLIBS = -framework IOKit -framework CoreFoundation -framework CoreAudio -framework Foundation
+LDLIBS = -framework IOKit -framework CoreFoundation -framework CoreAudio -framework Foundation \
+  -framework SystemConfiguration
 PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man/man1
@@ -10,7 +11,8 @@ OBJC_SOURCES = $(wildcard src/*.m)
 HEADERS = $(wildcard src/*.h)
 OBJECTS = $(C_SOURCES:src/%.c=build/%.o) $(OBJC_SOURCES:src/%.m=build/%.o)
 # The parts that need no hardware, audio, or sudo, for the unit tests.
-UNIT_SOURCES = tests/unit.c src/analysis.c src/stream.c src/timer.c src/morse.c
+UNIT_SOURCES = tests/unit.c src/analysis.c src/stream.c src/timer.c src/morse.c src/settings.c \
+  src/protocol.c
 
 .PHONY: all test install uninstall format clean
 
@@ -40,6 +42,7 @@ build/analyze: tools/analyze.m src/analysis.c src/analysis.h
 test: build/magsafe build/unit-test
 	build/unit-test
 	sh tests/cli.sh build/magsafe
+	sh tests/daemon.sh build/magsafe
 
 install: build/magsafe
 	install -d "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(MANDIR)" "$(DESTDIR)$(ZSHDIR)"

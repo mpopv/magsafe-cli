@@ -108,6 +108,14 @@ static int find_port(io_service_t *port_out, io_service_t *hpm_out, char *error,
   return 0;
 }
 
+bool hpm_connected(void) {
+  io_service_t port, hpm;
+  if (find_port(&port, &hpm, NULL, 0)) return false;
+  IOObjectRelease(hpm);
+  IOObjectRelease(port);
+  return true;
+}
+
 int hpm_open(HpmClient **output, char *error, size_t size) {
   *output = NULL;
   HpmClient *client = calloc(1, sizeof(*client));

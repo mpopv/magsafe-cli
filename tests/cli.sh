@@ -78,7 +78,7 @@ expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"g
   --json -n visualizer
 expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"amber\",\"preview\":true,\"frame_rate_hz\":30}" \
   --json -n visualizer amber --preview
-expect 0 '{"ok":true,*"supported":*"brightness-stream","visualizer","timer","morse"*"unavailable":*}' --json capabilities
+expect 0 '{"ok":true,*"supported":*"brightness-stream","visualizer","timer","morse","settings","daemon"*"unavailable":*}' --json capabilities
 expect 0 "{$dry:\"timer\",\"dry_run\":true,\"device_calls\":0,\"timer_ms\":1500000,\"warning_ms\":300000,\"count\":\"infinite\",\"interval_ms\":500,\"preparation_ms\":450,\"duration_ms\":null}" \
   --json -n timer 25m
 expect 0 "{$dry:\"timer\",\"dry_run\":true,\"device_calls\":0,\"timer_ms\":5400000,\"warning_ms\":300000,\"count\":10,\"interval_ms\":250,\"preparation_ms\":450,\"duration_ms\":5405000}" \
@@ -91,6 +91,35 @@ expect 0 "{$dry:\"morse\",*\"text\":\"HELLO, WORLD\",\"code\":\".... . .-.. .-..
   --json -n morse Hello, '  World ' -c 1
 expect 0 "{$dry:\"morse\",*\"count\":2,\"unit_ms\":100,\"preparation_ms\":450,\"duration_ms\":9750}" \
   --json -n morse paris -c 2 -i 100
+
+# Settings: reading needs no root, and changes here are dry runs.
+settings_dir=$(mktemp -d /tmp/magsafe-test.XXXXXX)
+MAGSAFE_SETTINGS="$settings_dir/settings"
+export MAGSAFE_SETTINGS
+expect 0 '{"ok":true,"command":"settings","dim":100,"color":"auto"}' --json settings
+printf 'dim=10\ncolor=green\n' >"$MAGSAFE_SETTINGS"
+expect 0 '{"ok":true,"command":"settings","dim":10,"color":"green"}' --json settings
+expect 0 'dim:   10
+color: green' settings
+printf 'dim=500\n' >"$MAGSAFE_SETTINGS"
+expect 1 "{\"ok\":false,\"error\":\"invalid dim '500' in settings (expected 0-100)\"}" --json settings
+rm -f "$MAGSAFE_SETTINGS"
+rmdir "$settings_dir"
+unset MAGSAFE_SETTINGS
+expect 0 "{$dry:\"settings\",\"dry_run\":true,\"device_calls\":0,\"dim\":10}" --json -n settings dim 10
+expect 0 "{$dry:\"settings\",\"dry_run\":true,\"device_calls\":0,\"color\":\"amber\"}" \
+  --json -n settings color amber
+expect 0 "{$dry:\"settings\",\"dry_run\":true,\"device_calls\":0,\"dim\":100,\"color\":\"auto\"}" \
+  --json -n settings reset
+
+# Daemon: status needs no root, and installing here is a dry run.
+MAGSAFE_SOCKET=/nonexistent/sock
+export MAGSAFE_SOCKET
+expect 0 '{"ok":true,"command":"daemon status","installed":*,"running":false,"daemon_version":null,"cli_version":"*","current":false,"socket":"/nonexistent/sock"}' \
+  --json daemon status
+unset MAGSAFE_SOCKET
+expect 0 "{$dry:\"daemon install\",\"dry_run\":true,\"device_calls\":0,\"helper\":\"/Library/PrivilegedHelperTools/com.mpopv.magsafe\",\"plist\":\"/Library/LaunchDaemons/com.mpopv.magsafe.plist\",\"socket\":\"/var/run/magsafe.sock\"}" \
+  --json -n daemon install
 
 # Usage errors
 expect_error "unknown command 'spin'" spin
@@ -136,6 +165,13 @@ expect_error "usage: magsafe morse <text>... \\[-c <n>\\] \\[-i <ms>\\]" morse
 expect_error "--duration-ms applies only to fade commands" morse sos -d 1000
 expect_error "planned run time is 61500 ms; finite effects are limited to 60000 ms (omit --count to repeat until stopped, or shorten the text or --interval-ms)" \
   morse the quick brown fox jumps over the lazy dog -c 1
+expect_error "invalid dim '101' (expected 0-100)" settings dim 101
+expect_error "invalid color mode 'purple' (expected auto, off, green, or amber)" settings color purple
+expect_error "usage: magsafe settings \\[dim <percent> | color <mode> | reset\\]" settings bogus
+expect_error "usage: magsafe settings \\[dim <percent> | color <mode> | reset\\]" settings dim
+expect_error "'daemon' needs a subcommand" daemon
+expect_error "unknown command 'daemon start'" daemon start
+expect_error "blink, fade, timer, and Morse options do not apply to 'settings'" settings dim 5 -c 2
 expect_error "invalid option '--bogus'" --bogus status
 expect 2 '{"ok":false,"error":"invalid option '"'"'--bogus'"'"'"}' -n --bogus status --json
 expect 2 '' -n spin

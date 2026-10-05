@@ -25,15 +25,20 @@ Commands that touch hardware run
 .Nm
 again through
 .Xr sudo 8 ,
-which may ask for a password.
+which may ask for a password, unless the daemon is installed: then the daemon
+runs them without one.
 Only one such command can run at a time.
+Every reset, including the one at the end of each effect, returns the light to
+the saved settings.
 Options can appear before or after the command.
 .Sh COMMANDS
 .Bl -tag -width Ds
 .It Cm status
 Show the firmware version, security flags, and light state.
 .It Cm reset
-Set both brightness scales to 100% and return color control to macOS.
+Set both brightness scales and the color mode to the saved settings: 100% and
+color control by macOS unless changed with
+.Cm settings .
 Every step is attempted even if another fails.
 .It Cm led set Ar mode
 Set the light to
@@ -102,6 +107,34 @@ Text may have up to 200 letters, digits, and the punctuation
 Morse code repeats until interrupted unless
 .Fl -count
 is given.
+.It Cm settings
+Show the saved brightness and color mode.
+.It Cm settings dim Ar percent
+Save the brightness, 0 to 100, that the light returns to, and apply it.
+.It Cm settings color Ar mode
+Save the color mode,
+.Cm auto ,
+.Cm off ,
+.Cm green ,
+or
+.Cm amber ,
+that the light returns to, and apply it.
+.It Cm settings reset
+Return to 100% brightness and color control by macOS.
+.It Cm daemon install
+Copy
+.Nm
+to a root-owned path, and start it as a launchd daemon that runs commands
+without a password for root, the user at the screen, and admins.
+The daemon applies the saved settings again at boot, on plug-in, and on wake.
+Run it again after upgrading
+.Nm ;
+until then, commands use
+.Xr sudo 8 .
+.It Cm daemon uninstall
+Stop and remove the daemon.
+.It Cm daemon status
+Show whether the daemon is installed and running, and its version.
 .It Cm led get
 Show the light mode, the two PWM outputs, and the color selector.
 .It Cm firmware version
@@ -183,10 +216,28 @@ light, without the cable or
 .Xr sudo 8 .
 When standard error is not a terminal, print one percentage per line.
 .El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev MAGSAFE_NO_DAEMON
+If set, use
+.Xr sudo 8
+even when the daemon is installed.
+.El
 .Sh FILES
 .Bl -tag -width Ds
 .It Pa /var/run/magsafe-cli.lock
 Lock held while a hardware command runs.
+.It Pa "/Library/Application Support/magsafe/settings"
+The saved settings.
+.It Pa /Library/PrivilegedHelperTools/com.mpopv.magsafe
+The daemon's root-owned copy of
+.Nm .
+.It Pa /Library/LaunchDaemons/com.mpopv.magsafe.plist
+The daemon's launchd job.
+.It Pa /var/run/magsafe.sock
+The daemon's socket.
+.It Pa /Library/Logs/magsafe-daemon.log
+The daemon's log.
 .El
 .Sh EXIT STATUS
 .Bl -tag -width Ds
@@ -231,9 +282,14 @@ Ramp green up over 2 seconds from a script:
 Show the plan of an effect as JSON, without touching hardware:
 .Dl $ magsafe --json --dry-run led fade-in green -c 3 -d 2000
 .Pp
-Return the light to macOS:
+Keep the light dim, and apply that at every plug-in:
+.Dl $ magsafe settings dim 10
+.Dl $ sudo magsafe daemon install
+.Pp
+Return the light to the saved settings:
 .Dl $ magsafe reset
 .Sh SEE ALSO
+.Xr launchctl 1 ,
 .Xr sudo 8
 .Pp
 .Lk https://github.com/mpopv/magsafe-cli

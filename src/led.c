@@ -95,16 +95,25 @@ int led_brightness(FwClient *fw, SmcClient *smc, FwColor color, unsigned percent
   return 0;
 }
 
-int led_reset(FwClient *fw, SmcClient *smc, char *error, size_t size) {
+int led_restore(FwClient *fw, SmcClient *smc, const Settings *settings, char *error, size_t size) {
   char amber[160] = "ok", green[160] = "ok", system[160] = "ok";
-  bool failed = fw_set_brightness(fw, FW_AMBER, 100, amber, sizeof(amber)) != 0;
-  failed |= fw_set_brightness(fw, FW_GREEN, 100, green, sizeof(green)) != 0;
-  failed |= smc_set_led(smc, SMC_LED_AUTO, system, sizeof(system)) != 0;
+  bool failed = fw_set_brightness(fw, FW_AMBER, settings->dim, amber, sizeof(amber)) != 0;
+  failed |= fw_set_brightness(fw, FW_GREEN, settings->dim, green, sizeof(green)) != 0;
+  failed |= smc_set_led(smc, settings->color, system, sizeof(system)) != 0;
   if (!failed) return 0;
   return append(error, size,
                 "reset incomplete (amber brightness: %s; green brightness: %s; "
-                "system color control: %s)",
+                "color mode: %s)",
                 amber, green, system);
+}
+
+int led_reset(FwClient *fw, SmcClient *smc, Settings *applied, char *error, size_t size) {
+  /* Unreadable settings fall back to the defaults: the light is restored
+   * either way. */
+  Settings settings;
+  if (settings_load(&settings, NULL, 0)) settings = SETTINGS_DEFAULTS;
+  if (applied) *applied = settings;
+  return led_restore(fw, smc, &settings, error, size);
 }
 
 /* Zero both scales, select color, and wait while the cable's own color
@@ -177,7 +186,7 @@ int led_run(FwClient *fw, SmcClient *smc, const LedEffect *effect, char *error, 
     }
   }
   /* Cleanup ignores the stop signal so that it always runs. */
-  if (led_reset(fw, smc, error, size)) return -1;
+  if (led_reset(fw, smc, NULL, error, size)) return -1;
   return result ? -1 : interrupted(error, size);
 }
 
@@ -247,7 +256,7 @@ int led_stream(FwClient *fw, SmcClient *smc, FwColor color, int input, LedStream
   }
   result->values = parser.values;
   /* Cleanup ignores the stop signal so that it always runs. */
-  if (led_reset(fw, smc, error, size)) return -1;
+  if (led_reset(fw, smc, NULL, error, size)) return -1;
   return status ? -1 : interrupted(error, size);
 }
 
@@ -307,7 +316,7 @@ int led_timer(FwClient *fw, SmcClient *smc, const LedTimer *timer, unsigned long
     status = sound_alarm(fw, timer, flashes, error, size);
   }
   /* Cleanup ignores the stop signal so that it always runs. */
-  if (led_reset(fw, smc, error, size)) return -1;
+  if (led_reset(fw, smc, NULL, error, size)) return -1;
   return status;
 }
 
@@ -346,6 +355,6 @@ int led_morse(FwClient *fw, SmcClient *smc, const LedMorse *morse, unsigned long
     }
   }
   /* Cleanup ignores the stop signal so that it always runs. */
-  if (led_reset(fw, smc, error, size)) return -1;
+  if (led_reset(fw, smc, NULL, error, size)) return -1;
   return status ? -1 : interrupted(error, size);
 }

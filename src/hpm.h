@@ -4,6 +4,7 @@
 #ifndef MAGSAFE_HPM_H
 #define MAGSAFE_HPM_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -11,6 +12,9 @@
  * private Apple interface. Only the fixed firmware offsets that firmware.c
  * uses are accepted, with 4 to 24 bytes in multiples of 4. */
 typedef struct HpmClient HpmClient;
+
+/* Whether a cable is connected to the MagSafe port. Reads the registry only. */
+bool hpm_connected(void);
 
 int hpm_open(HpmClient **client, char *error, size_t size);
 void hpm_close(HpmClient *client);

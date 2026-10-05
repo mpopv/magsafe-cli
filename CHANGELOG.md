@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- `sudo magsafe daemon install` adds a root launchd daemon that runs `magsafe`
+  commands without a password, for root, the user at the screen, and admins.
+  Commands behave as through sudo, with the same output, exit codes, and
+  Ctrl-C. The daemon runs from a root-owned copy of `magsafe`, so reinstall it
+  after upgrading; until then, commands use sudo. `daemon uninstall` and
+  `daemon status` remove and check it, and `MAGSAFE_NO_DAEMON=1` skips it.
+- `settings dim <percent>` and `settings color <mode>` save the brightness and
+  color mode that the light returns to. Every reset, including the one after
+  each effect, now returns to them instead of 100% and macOS control. The
+  daemon applies them again at boot, on plug-in, and on wake.
+- The JSON fields `brightness_percent` and `system_color_control_requested`
+  show the settings that the light returned to.
+- The visualizer starts its light helper as a plain `magsafe led stream`, so
+  the helper uses the daemon when one is installed.
+- The daemon has not yet run under launchd on hardware. It was tested as a
+  user on a private socket, with stand-in commands for Ctrl-C and exit codes.
+
 ## [0.10.0] - 2026-10-04
 
 - `morse <text>` sends text in green, in international Morse code with

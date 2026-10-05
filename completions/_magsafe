@@ -33,6 +33,8 @@ _magsafe() {
         'visualizer:pulse the light to the audio that is playing'
         'timer:count down on the light, then flash amber'
         'morse:send text in Morse code'
+        'settings:show or save the brightness and color mode'
+        'daemon:install, remove, or check the daemon'
         'capabilities:list supported and unavailable functions'
         'version:show the magsafe version'
         'help:show help'
@@ -72,6 +74,31 @@ _magsafe() {
           ;;
         morse)
           _message 'text to send' && ret=0
+          ;;
+        settings)
+          if (( CURRENT == 2 )); then
+            commands=(
+              'dim:save the brightness the light returns to'
+              'color:save the color mode'
+              'reset:return to 100% and macOS color control'
+            )
+            _describe -t commands 'settings command' commands && ret=0
+          elif (( CURRENT == 3 )); then
+            case $line[2] in
+              dim) _message 'percent (0-100)' && ret=0 ;;
+              color) _values mode auto off green amber && ret=0 ;;
+            esac
+          fi
+          ;;
+        daemon)
+          if (( CURRENT == 2 )); then
+            commands=(
+              'install:run commands without a password'
+              'uninstall:remove the daemon'
+              'status:show whether the daemon runs'
+            )
+            _describe -t commands 'daemon command' commands && ret=0
+          fi
           ;;
         firmware)
           if (( CURRENT == 2 )); then

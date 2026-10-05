@@ -6,6 +6,7 @@
 
 #include "apple-smc.h"
 #include "firmware.h"
+#include "settings.h"
 #include <signal.h>
 #include <stdbool.h>
 
@@ -37,9 +38,13 @@ int led_catch_signals(char *error, size_t size);
 int led_brightness(FwClient *fw, SmcClient *smc, FwColor color, unsigned percent, FwLedState *state,
                    char *error, size_t size);
 
-/* Set both brightness scales to 100% and return color control to macOS. Every
- * step is attempted, even with a closed client. Failures are added to error. */
-int led_reset(FwClient *fw, SmcClient *smc, char *error, size_t size);
+/* Set both brightness scales and the color mode to settings. Every step is
+ * attempted, even with a closed client. Failures are added to error. */
+int led_restore(FwClient *fw, SmcClient *smc, const Settings *settings, char *error, size_t size);
+
+/* led_restore with the saved settings: by default, 100% brightness and color
+ * control by macOS. *applied, if not null, receives the settings used. */
+int led_reset(FwClient *fw, SmcClient *smc, Settings *applied, char *error, size_t size);
 
 /* Run a blink or fade, then led_reset. Brightness is checked at each fade peak
  * and trough. */

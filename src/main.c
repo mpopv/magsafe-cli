@@ -3,10 +3,12 @@
 
 #include "apple-smc.h"
 #include "audio.h"
+#include "daemon.h"
 #include "error.h"
 #include "firmware.h"
 #include "led.h"
 #include "morse.h"
+#include "settings.h"
 #include "timer.h"
 #include "visualizer.h"
 #include <errno.h>
@@ -23,6 +25,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define VERSION "0.10.0"
@@ -53,6 +56,13 @@ static const char help_text[] =
     "  visualizer [<color>]          Pulse green (default) or amber to the playing audio\n"
     "  timer <duration>              Count down on the light, then flash amber\n"
     "  morse <text>                  Send text in green Morse code\n"
+    "  settings                      Show the saved brightness and color mode\n"
+    "  settings dim <percent>        Save the brightness the light returns to\n"
+    "  settings color <mode>         Save the color mode: auto, off, green, or amber\n"
+    "  settings reset                Return to 100% brightness and macOS color\n"
+    "  daemon install                Run commands without sudo, and keep settings\n"
+    "  daemon uninstall              Remove the daemon\n"
+    "  daemon status                 Show whether the daemon runs\n"
     "  capabilities                  List supported and unavailable functions\n"
     "  version                       Show the magsafe version\n"
     "  help                          Show this help\n"
@@ -85,7 +95,8 @@ static const char help_text[] =
     "visualizer needs System Audio Recording permission for your terminal app,\n"
     "and macOS 14.2 or later.\n"
     "Diagnostics, brightness, and effects require cable firmware " FW_SUPPORTED_VERSION_TEXT ".\n"
-    "Hardware commands run through sudo, which may ask for your password.\n";
+    "Every reset returns to the saved settings. Hardware commands run through\n"
+    "sudo, which may ask for your password, unless the daemon is installed.\n";
 
 typedef enum {
   CMD_HELP,
@@ -107,6 +118,11 @@ typedef enum {
   CMD_VISUALIZER,
   CMD_TIMER,
   CMD_MORSE,
+  CMD_SETTINGS,
+  CMD_DAEMON_INSTALL,
+  CMD_DAEMON_UNINSTALL,
+  CMD_DAEMON_STATUS,
+  CMD_DAEMON_RUN,
 } Command;
 
 static const struct {
@@ -133,6 +149,11 @@ static const struct {
     [CMD_VISUALIZER] = {"visualizer", " [<color>] [--preview]", 0, 1},
     [CMD_TIMER] = {"timer", " <duration> [-c <n>] [-i <ms>]", 1, 1},
     [CMD_MORSE] = {"morse", " <text>... [-c <n>] [-i <ms>]", 1, 64},
+    [CMD_SETTINGS] = {"settings", " [dim <percent> | color <mode> | reset]", 0, 2},
+    [CMD_DAEMON_INSTALL] = {"daemon install", "", 0, 0},
+    [CMD_DAEMON_UNINSTALL] = {"daemon uninstall", "", 0, 0},
+    [CMD_DAEMON_STATUS] = {"daemon status", "", 0, 0},
+    [CMD_DAEMON_RUN] = {"daemon run", "", 0, 0},
 };
 
 static const char *const mode_names[] = {[SMC_LED_AUTO] = "auto",
@@ -152,6 +173,8 @@ typedef struct {
   bool alternate;       /* led blink alternate */
   unsigned long timer_ms;
   char text[MORSE_TEXT_MAX + 1]; /* morse */
+  enum { SETTINGS_SHOW, SETTINGS_DIM, SETTINGS_COLOR, SETTINGS_RESET } change;
+  Settings settings; /* settings dim and color: the new value */
   unsigned count, interval_ms, duration_ms;
 } Options;
 
@@ -289,6 +312,14 @@ static void put_led(const FwLedState *led) {
   put_code("color_selector", led->color, selector_names[led->color]);
 }
 
+/* The settings that a reset returned the light to. */
+static void put_restored(void) {
+  Settings settings;
+  if (settings_load(&settings, NULL, 0)) settings = SETTINGS_DEFAULTS;
+  put_number("brightness_percent", settings.dim);
+  put_bool("system_color_control_requested", settings.color == SMC_LED_AUTO);
+}
+
 static int report_error(const Options *o, const char *message, int code) {
   if (o->json) {
     printf("{\"ok\":false,\"error\":");
@@ -416,6 +447,28 @@ static int parse_morse(Options *o, char **words, int count_words, const char *co
   return 0;
 }
 
+static int parse_settings(Options *o, char **args, int given, char *error, size_t size) {
+  if (given == 0) return 0;
+  if (given == 1 && !strcmp(args[0], "reset")) {
+    o->change = SETTINGS_RESET;
+    return 0;
+  }
+  if (given == 2 && !strcmp(args[0], "dim")) {
+    o->change = SETTINGS_DIM;
+    if (parse_number(args[1], 0, 100, &o->settings.dim))
+      return fail(error, size, "invalid dim '%s' (expected 0-100)", args[1]);
+    return 0;
+  }
+  if (given == 2 && !strcmp(args[0], "color")) {
+    o->change = SETTINGS_COLOR;
+    if (settings_color(args[1], &o->settings.color))
+      return fail(error, size, "invalid color mode '%s' (expected auto, off, green, or amber)",
+                  args[1]);
+    return 0;
+  }
+  return fail(error, size, "usage: magsafe settings%s", commands[CMD_SETTINGS].usage);
+}
+
 static void set_once(const char **value, const char *flag, char *error, size_t size) {
   if (*value && !*error) fail(error, size, "%s given more than once", flag);
   *value = optarg;
@@ -509,6 +562,7 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
     case CMD_LED_FADE: return parse_effect(o, args[0], count, interval, duration, error, size);
     case CMD_TIMER: return parse_timer(o, args[0], count, interval, error, size);
     case CMD_MORSE: return parse_morse(o, args, given, count, interval, error, size);
+    case CMD_SETTINGS: return parse_settings(o, args, given, error, size);
     default: return 0;
   }
 }
@@ -532,6 +586,8 @@ static void capabilities(void) {
                                           "visualizer",
                                           "timer",
                                           "morse",
+                                          "settings",
+                                          "daemon",
                                           "volatile-brightness",
                                           "reset"};
   static const char *const unavailable[] = {"firmware-flash", "security-write", "calibration-write",
@@ -549,7 +605,8 @@ static void dry_run(const Options *o) {
   begin(commands[o->command].name);
   put_bool("dry_run", true);
   put_number("device_calls", 0);
-  if (o->argument && o->command != CMD_TIMER && o->command != CMD_MORSE)
+  if (o->argument && o->command != CMD_TIMER && o->command != CMD_MORSE &&
+      o->command != CMD_SETTINGS)
     put_string("color", o->argument);
   if (o->command == CMD_LED_BRIGHTNESS) put_number("percent", o->percent);
   if (is_effect(o->command)) {
@@ -586,6 +643,18 @@ static void dry_run(const Options *o) {
     if (o->count == LED_INFINITE) put_null("duration_ms");
     else put_number("duration_ms", morse_ms(o));
   }
+  if (o->command == CMD_SETTINGS && o->change == SETTINGS_DIM) put_number("dim", o->settings.dim);
+  if (o->command == CMD_SETTINGS && o->change == SETTINGS_COLOR)
+    put_string("color", settings_color_name(o->settings.color));
+  if (o->command == CMD_SETTINGS && o->change == SETTINGS_RESET) {
+    put_number("dim", 100);
+    put_string("color", "auto");
+  }
+  if (o->command == CMD_DAEMON_INSTALL) {
+    put_string("helper", DAEMON_HELPER);
+    put_string("plist", DAEMON_PLIST);
+    put_string("socket", DAEMON_SOCKET);
+  }
   if (o->command == CMD_LED_STREAM) put_number("max_rate_hz", LED_STREAM_HZ);
   if (o->command == CMD_VISUALIZER) {
     put_bool("preview", o->preview);
@@ -612,7 +681,8 @@ static int executable_path(char resolved[PATH_MAX], char *error, size_t size) {
 /* Re-run this command through sudo unless it already runs as root. Returns 0
  * when no elevation is needed; otherwise returns only on failure. */
 static int elevate(int argc, char **argv, char *error, size_t size) {
-  if (geteuid() == 0) return 0;
+  /* The daemon runs its commands as root already. */
+  if (geteuid() == 0 || getenv(DAEMON_CHILD_ENV)) return 0;
   char resolved[PATH_MAX];
   if (executable_path(resolved, error, size)) return -1;
   char **args = calloc((size_t)argc + 3, sizeof(*args));
@@ -761,8 +831,7 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
         put_number("interval_ms", o->interval_ms);
         put_bool("pwm_verified", true);
       }
-      put_number("brightness_percent", 100);
-      put_bool("system_color_control_requested", true);
+      put_restored();
       end();
       return 0;
     }
@@ -781,8 +850,7 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
       put_string("color", o->argument);
       put_number("values", stream.values);
       put_number("writes", stream.writes);
-      put_number("brightness_percent", 100);
-      put_bool("system_color_control_requested", true);
+      put_restored();
       end();
       return 0;
     }
@@ -805,8 +873,7 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
       put_firmware(fw);
       put_number("timer_ms", o->timer_ms);
       put_number("flashes", flashes);
-      put_number("brightness_percent", 100);
-      put_bool("system_color_control_requested", true);
+      put_restored();
       end();
       return 0;
     }
@@ -830,23 +897,44 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
       put_string("code", code);
       put_number("repetitions", sent);
       put_number("unit_ms", o->interval_ms);
-      put_number("brightness_percent", 100);
-      put_bool("system_color_control_requested", true);
+      put_restored();
+      end();
+      return 0;
+    }
+
+    case CMD_SETTINGS: {
+      /* Save first, so that the setting holds even without the cable. */
+      Settings settings;
+      if (o->change == SETTINGS_RESET || settings_load(&settings, NULL, 0))
+        settings = SETTINGS_DEFAULTS;
+      if (o->change == SETTINGS_DIM) settings.dim = o->settings.dim;
+      if (o->change == SETTINGS_COLOR) settings.color = o->settings.color;
+      if (settings_save(&settings, error, size)) return -1;
+      fw_open(fw, NULL, 0);
+      smc_open(smc, NULL, 0);
+      char problem[512] = "";
+      bool applied = !led_restore(fw, smc, &settings, problem, sizeof(problem));
+      if (!applied && !json_output)
+        fprintf(stderr, "magsafe: saved, but not applied: %s\n", problem);
+      if (!json_output) return 0;
+      begin(name);
+      put_number("dim", settings.dim);
+      put_string("color", settings_color_name(settings.color));
+      put_bool("applied", applied);
       end();
       return 0;
     }
 
     case CMD_RESET:
-      /* Without the cable, reset still returns color control to macOS, and
+      /* Without the cable, reset still sets the saved color mode, and
        * led_reset reports the brightness steps as unavailable. */
       fw_open(fw, NULL, 0);
       smc_open(smc, NULL, 0);
-      if (led_reset(fw, smc, error, size)) return -1;
+      if (led_reset(fw, smc, NULL, error, size)) return -1;
       if (!json_output) return 0;
       begin(name);
       put_firmware(fw);
-      put_number("brightness_percent", 100);
-      put_bool("system_color_control_requested", true);
+      put_restored();
       end();
       return 0;
 
@@ -868,8 +956,9 @@ typedef struct {
   bool reaped;
 } Helper;
 
-/* Start 'magsafe [--json] led stream <color>' through sudo, unless this
- * process is already root, with pipes for its standard input and output. */
+/* Start 'magsafe [--json] led stream <color>' with pipes for its standard
+ * input and output. Like any magsafe command, it runs through the daemon if
+ * one is installed, and otherwise through sudo. */
 static int start_helper(const Options *o, Helper *helper, int *output, char *error, size_t size) {
   char path[PATH_MAX];
   if (executable_path(path, error, size)) return -1;
@@ -889,10 +978,6 @@ static int start_helper(const Options *o, Helper *helper, int *output, char *err
 
   char *args[8];
   int count = 0;
-  if (geteuid() != 0) {
-    args[count++] = "/usr/bin/sudo";
-    args[count++] = "--";
-  }
   args[count++] = path;
   if (o->json) args[count++] = "--json";
   args[count++] = "led";
@@ -1021,6 +1106,164 @@ static int visualize(const Options *o, char *error, size_t size) {
   return report_error(o, error, 1);
 }
 
+/* Commands that need no root */
+
+static int show_settings(const Options *o) {
+  Settings settings;
+  char error[512] = "";
+  if (settings_load(&settings, error, sizeof(error))) return report_error(o, error, 1);
+  begin(commands[o->command].name);
+  put_number("dim", settings.dim);
+  put_string("color", settings_color_name(settings.color));
+  end();
+  return 0;
+}
+
+static int show_daemon(const Options *o) {
+  char version[DAEMON_VERSION_MAX] = "";
+  bool running = !daemon_ping(version, NULL, 0);
+  begin(commands[o->command].name);
+  put_bool("installed", daemon_installed());
+  put_bool("running", running);
+  if (running) put_string("daemon_version", version);
+  else field("daemon_version", json_output ? "null" : "none", false);
+  put_string("cli_version", VERSION);
+  put_bool("current", running && !strcmp(version, VERSION));
+  put_string("socket", daemon_socket_path());
+  end();
+  return 0;
+}
+
+/* The daemon */
+
+static bool is_daemon_command(Command command) {
+  return command == CMD_DAEMON_INSTALL || command == CMD_DAEMON_UNINSTALL ||
+         command == CMD_DAEMON_STATUS || command == CMD_DAEMON_RUN;
+}
+
+/* Commands that the daemon runs: those that touch the cable or save settings. */
+static bool needs_daemon(const Options *o) {
+  switch (o->command) {
+    case CMD_HELP:
+    case CMD_VERSION:
+    case CMD_CAPABILITIES:
+    case CMD_VISUALIZER: return false; /* its light helper goes through the daemon */
+    case CMD_SETTINGS: return o->change != SETTINGS_SHOW;
+    default: return !o->dry_run && !is_daemon_command(o->command);
+  }
+}
+
+/* Run the command through the daemon when one is installed and current. */
+static int route(int argc, char **argv, int *code, char *error, size_t size) {
+  if (geteuid() == 0 || getenv(DAEMON_CHILD_ENV) || getenv("MAGSAFE_NO_DAEMON"))
+    return DAEMON_UNAVAILABLE;
+  int result = daemon_request(argc - 1, argv + 1, VERSION, code, error, size);
+  if (result == DAEMON_UNAVAILABLE && *error) {
+    fprintf(stderr, "magsafe: %s\n", error);
+    *error = '\0';
+  }
+  return result;
+}
+
+/* The daemon checks each request with the same parser as the command line,
+ * and runs only commands that a client would send it. */
+static bool allow(int argc, char **argv, char *message, size_t size) {
+  char *args[DAEMON_ARGS_MAX + 2] = {"magsafe"};
+  char error[512] = "";
+  Options o;
+  for (int i = 0; i < argc; ++i) args[i + 1] = argv[i];
+  optind = 1;
+  optreset = 1;
+  if (parse(argc + 1, args, &o, error, sizeof(error))) {
+    snprintf(message, size, "%s", error);
+    return false;
+  }
+  if (needs_daemon(&o)) return true;
+  snprintf(message, size, "the daemon does not run '%s'", commands[o.command].name);
+  return false;
+}
+
+/* Apply the saved settings at start, on plug-in, and on wake, since the
+ * cable forgets its brightness when it loses power. */
+static void maintain(void) {
+  static bool connected_before, pending = true;
+  static unsigned attempts;
+  static uint64_t monotonic_before, uptime_before;
+  /* Time asleep counts in the monotonic clock but not in uptime. */
+  uint64_t monotonic = clock_gettime_nsec_np(CLOCK_MONOTONIC);
+  uint64_t uptime = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+  bool woke =
+      monotonic_before && monotonic - monotonic_before > uptime - uptime_before + 1000000000ull;
+  monotonic_before = monotonic;
+  uptime_before = uptime;
+  bool connected = hpm_connected();
+  if (woke || (connected && !connected_before)) {
+    pending = true;
+    attempts = 0;
+  }
+  connected_before = connected;
+  Settings settings;
+  if (!connected || !pending || attempts >= 10) return;
+  if (settings_load(&settings, NULL, 0) || settings_are_default(&settings)) {
+    pending = false;
+    return;
+  }
+  char error[512] = "";
+  int lock = acquire_lock(error, sizeof(error));
+  if (lock < 0) return; /* a command is running; it resets to the settings itself */
+  FwClient fw = {0};
+  SmcClient smc = {0};
+  if (fw_open(&fw, error, sizeof(error)) || smc_open(&smc, error, sizeof(error)) ||
+      led_restore(&fw, &smc, &settings, error, sizeof(error))) {
+    /* The cable may need a moment after plug-in. */
+    if (++attempts == 10) daemon_log("cannot apply settings: %s", error);
+  } else {
+    pending = false;
+    daemon_log("applied settings: dim %u, color %s", settings.dim,
+               settings_color_name(settings.color));
+  }
+  fw_close(&fw);
+  smc_close(&smc);
+  close(lock);
+}
+
+static int run_daemon(const Options *o, char *error, size_t size) {
+  static const DaemonHooks hooks = {allow, maintain};
+  char path[PATH_MAX];
+  if (!executable_path(path, error, size)) daemon_serve(path, VERSION, &hooks, error, size);
+  return report_error(o, error, 1);
+}
+
+static int install_daemon(const Options *o, char *error, size_t size) {
+  char path[PATH_MAX];
+  if (executable_path(path, error, size) || daemon_install(path, VERSION, error, size))
+    return report_error(o, error, 1);
+  if (!json_output) {
+    printf("The magsafe daemon %s is running. Commands no longer need sudo.\n", VERSION);
+    return 0;
+  }
+  begin(commands[o->command].name);
+  put_string("helper", DAEMON_HELPER);
+  put_string("plist", DAEMON_PLIST);
+  put_string("socket", DAEMON_SOCKET);
+  put_string("daemon_version", VERSION);
+  end();
+  return 0;
+}
+
+static int uninstall_daemon(const Options *o, char *error, size_t size) {
+  bool removed = false;
+  if (daemon_uninstall(&removed, error, size)) return report_error(o, error, 1);
+  if (!json_output) {
+    puts(removed ? "Removed the magsafe daemon." : "The magsafe daemon was not installed.");
+    return 0;
+  }
+  begin(commands[o->command].name);
+  put_bool("removed", removed);
+  end();
+  return 0;
+}
+
 int main(int argc, char **argv) {
   Options o;
   char error[512] = "";
@@ -1038,8 +1281,24 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (o.command == CMD_VISUALIZER) return visualize(&o, error, sizeof(error));
+  if (o.command == CMD_SETTINGS && o.change == SETTINGS_SHOW) return show_settings(&o);
+  if (o.command == CMD_DAEMON_STATUS) return show_daemon(&o);
 
-  if (elevate(argc, argv, error, sizeof(error))) return report_error(&o, error, 1);
+  /* With a daemon installed, it runs the command without a password. */
+  if (needs_daemon(&o)) {
+    int code = 1, routed = route(argc, argv, &code, error, sizeof(error));
+    if (routed == 0) return code;
+    if (routed < 0) return report_error(&o, error, 1);
+  }
+  /* A test daemon runs as the user, with its own socket. */
+  bool test_daemon = o.command == CMD_DAEMON_RUN && getenv("MAGSAFE_SOCKET") && geteuid() != 0;
+  if (!test_daemon && elevate(argc, argv, error, sizeof(error))) return report_error(&o, error, 1);
+  switch (o.command) {
+    case CMD_DAEMON_RUN: return run_daemon(&o, error, sizeof(error));
+    case CMD_DAEMON_INSTALL: return install_daemon(&o, error, sizeof(error));
+    case CMD_DAEMON_UNINSTALL: return uninstall_daemon(&o, error, sizeof(error));
+    default: break;
+  }
   int lock = acquire_lock(error, sizeof(error));
   if (lock < 0) return report_error(&o, error, 1);
   FwClient fw = {0};

@@ -6,7 +6,7 @@ You need the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
 make          # build build/magsafe
-make test     # run unit and CLI tests (no cable, audio, or sudo needed)
+make test     # run unit, CLI, and daemon tests (no cable, audio, or sudo needed)
 make format   # format sources with clang-format
 make clean    # remove build output
 ```
@@ -31,11 +31,20 @@ The analysis looks for beats every 5 ms:
 
 The visualizer sends 30 frames a second, each held back by the output device's reported latency minus about 25 ms for the light itself.
 
+### Daemon
+
+`tests/daemon.sh` runs a test daemon as you, on a private socket: a process that is not root may set `MAGSAFE_SOCKET` for both the daemon and its clients, and `MAGSAFE_SETTINGS` for the settings file. The commands such a daemon runs fail at the root-only lock file, and the error coming back through the client shows that the command ran in the daemon with the client's streams. To try a command without the installed daemon, set `MAGSAFE_NO_DAEMON=1`.
+
+The daemon accepts requests only from root, its own user, the user at the screen, and admins, and only of its own version. It parses each command line as the client does, runs only commands that need root, and gives each one a fixed environment. See [`src/protocol.h`](src/protocol.h) for the messages.
+
 ## Source layout
 
 | Source | Role |
 | --- | --- |
-| [`src/main.c`](src/main.c) | Argument parsing, sudo, locking, and output |
+| [`src/main.c`](src/main.c) | Argument parsing, sudo and daemon routing, locking, and output |
+| [`src/daemon.c`](src/daemon.c) | The daemon, its client, and installation |
+| [`src/protocol.c`](src/protocol.c) | Daemon messages |
+| [`src/settings.c`](src/settings.c) | Saved brightness and color mode |
 | [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, timer, Morse, and reset |
 | [`src/stream.c`](src/stream.c) | `led stream` input parsing |
 | [`src/timer.c`](src/timer.c) | Timer durations and dimming schedule |
@@ -67,6 +76,8 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 - `led stream` and the visualizer driving the cable, including how fast the cable accepts brightness changes
 - the timer and Morse code on the cable; their sequences, timing, and signal handling were tested only against stand-in firmware
 - sudo passing the visualizer's pipe through to `led stream`
+- the daemon as root under launchd. A test daemon ran as a user on a private socket; Ctrl-C, a killed client, and exit codes were checked with a stand-in command in place of `magsafe`
+- settings applied at plug-in and wake, and whether the cable keeps a dim setting when macOS switches between amber and green
 - signal cleanup
 - visible light output
 

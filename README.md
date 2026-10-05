@@ -1,6 +1,6 @@
 # magsafe
 
-Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, run a timer on it, send Morse code, and read the cable's firmware state.
+Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, run a timer on it, send Morse code, keep it dim, and read the cable's firmware state.
 
 ```sh
 magsafe led set amber                 # solid amber
@@ -10,7 +10,9 @@ magsafe led fade green                # breathe until Ctrl-C
 magsafe visualizer                    # pulse to the music until Ctrl-C
 magsafe timer 25m                     # dim as time runs out, then flash
 magsafe morse sos                     # ... --- ... until Ctrl-C
-magsafe reset                         # hand the light back to macOS
+magsafe settings dim 10               # keep the light at 10%
+magsafe reset                         # back to your settings
+sudo magsafe daemon install           # no more password prompts
 ```
 
 > [!WARNING]
@@ -43,7 +45,7 @@ magsafe [options] <command> [<args>]
 | Command | Description |
 | --- | --- |
 | `status` | Show firmware version, security flags, and light state |
-| `reset` | Restore 100% brightness and return color control to macOS |
+| `reset` | Return to the saved brightness and color mode (100% and macOS by default) |
 | `led set <mode>` | Set the light to `auto`, `off`, `green`, or `amber` |
 | `led brightness <color> <percent>` | Light `green` or `amber` at 0–100% brightness |
 | `led blink <color>` | Blink `green`, `amber`, or `alternate` |
@@ -58,6 +60,13 @@ magsafe [options] <command> [<args>]
 | `visualizer [<color>]` | Pulse `green` (the default) or `amber` to the audio that is playing |
 | `timer <duration>` | Count down on the light, then flash amber |
 | `morse <text>` | Send text in green Morse code |
+| `settings` | Show the saved brightness and color mode |
+| `settings dim <percent>` | Save the brightness the light returns to: 0–100 |
+| `settings color <mode>` | Save the color mode: `auto`, `off`, `green`, or `amber` |
+| `settings reset` | Return to 100% brightness and macOS color control |
+| `daemon install` | Run commands without a password, and apply settings at plug-in |
+| `daemon uninstall` | Remove the daemon |
+| `daemon status` | Show whether the daemon runs, and its version |
 | `capabilities` | List supported and unavailable functions |
 | `version` | Show the `magsafe` version |
 | `help` | Show help |
@@ -75,7 +84,7 @@ magsafe [options] <command> [<args>]
 
 Options can go before or after the command, as `--count 4`, `--count=4`, or `-c 4`. See `man magsafe` for the full reference.
 
-**sudo:** commands that touch hardware need root, so `magsafe` checks the command and then runs itself again through `sudo`. Don't type `sudo` yourself. Help, `version`, `capabilities`, dry runs, and invalid commands never ask for a password. A script without a terminal needs cached sudo credentials.
+**sudo:** commands that touch hardware need root, so `magsafe` checks the command and then runs itself again through `sudo`. Don't type `sudo` yourself. Help, `version`, `capabilities`, dry runs, and invalid commands never ask for a password. With the [daemon](#daemon) installed, no command asks for one.
 
 **One at a time:** only one hardware command can run at once. A second fails with `another magsafe command is running` instead of waiting.
 
@@ -103,7 +112,7 @@ magsafe led fade green                    # up and down until Ctrl-C
 
 - Effects repeat until Ctrl-C unless you give `--count`. A finite effect must fit in 60 seconds. `--dry-run` shows the planned time.
 - Each effect selects its color while the light is off and waits 450 ms for the cable's own color transition. Alternate blink does this before every flash.
-- When an effect finishes, fails, or is interrupted, it runs `reset`, so any brightness you set beforehand is not restored.
+- When an effect finishes, fails, or is interrupted, it runs `reset`, which returns the light to your [settings](#settings).
 
 ### Timer
 
@@ -157,7 +166,30 @@ for p in $(seq 0 5 100); do echo "$p"; sleep 0.1; done | magsafe led stream gree
 magsafe reset
 ```
 
-Sets both brightness scales to 100% and returns color control to macOS. Each step runs even if another fails, so color control returns to macOS even when the cable is missing. This is not a factory reset.
+Sets both brightness scales and the color mode to your [settings](#settings): 100% and color control by macOS, unless you changed them. Each step runs even if another fails, so the color mode is set even when the cable is missing. This is not a factory reset.
+
+### Settings
+
+```sh
+magsafe settings                  # show them
+magsafe settings dim 10           # the light returns to 10%
+magsafe settings color green      # and stays green, instead of macOS choosing
+magsafe settings reset            # 100% and macOS color control again
+```
+
+Settings are the brightness and color mode that the light returns to after every command. Changing one applies it at once, and saves it in `/Library/Application Support/magsafe/settings`. The cable forgets its brightness when it loses power, as when you unplug it: the [daemon](#daemon) applies your settings again at boot, on plug-in, and on wake. Without the daemon, they apply at the next reset.
+
+### Daemon
+
+```sh
+sudo magsafe daemon install       # once, and after each upgrade
+magsafe daemon status
+sudo magsafe daemon uninstall
+```
+
+The daemon is a root background service, started by launchd at boot, that runs `magsafe` commands for you without a password. Commands behave exactly as through sudo: the same output, `--json`, exit codes, and Ctrl-C. It serves root, the user at the Mac's screen, and admins.
+
+`daemon install` copies `magsafe` to `/Library/PrivilegedHelperTools/com.mpopv.magsafe`, owned by root, because a root service must not run a file that your user account can change, as it can under Homebrew. So after `brew upgrade`, run `sudo magsafe daemon install` again. Until you do, `magsafe` notices that the versions differ, says so, and uses sudo. Without the daemon, or with `MAGSAFE_NO_DAEMON=1`, commands use sudo as before. The daemon logs to `/Library/Logs/magsafe-daemon.log`.
 
 ### Reading state
 
@@ -208,9 +240,13 @@ Read commands use the same field names in both modes. Without `--json`, commands
 | `timer` | `firmware`, `version_word`, `timer_ms`, `flashes`, `brightness_percent`, `system_color_control_requested` |
 | `morse` | `firmware`, `version_word`, `text`, `code`, `repetitions`, `unit_ms`, `brightness_percent`, `system_color_control_requested` |
 | `reset` | `firmware`, `version_word`, `brightness_percent`, `system_color_control_requested` |
+| `settings` | `dim`, `color`, and, after a change, `applied` |
+| `daemon status` | `installed`, `running`, `daemon_version`, `cli_version`, `current`, `socket` |
+| `daemon install` | `helper`, `plist`, `socket`, `daemon_version` |
+| `daemon uninstall` | `removed` |
 | `capabilities` | `cli_version`, `diagnostic_firmware`, `supported`, `unavailable` (no `command`) |
 
-`version_word` and `security_word` are hexadecimal strings. On success, `brightness_percent` is always `100`, and `pwm_verified` and `system_color_control_requested` are always `true`. An effect that is stopped reports an error, not a result, so the visualizer always reports an error.
+`version_word` and `security_word` are hexadecimal strings. On success, `pwm_verified` is always `true`, and `brightness_percent` and `system_color_control_requested` show the settings that the light returned to. An effect that is stopped reports an error, not a result, so the visualizer always reports an error.
 
 </details>
 
@@ -230,13 +266,14 @@ $ magsafe --json --dry-run led blink alternate -c 6 -i 250
 | `2` | Invalid command, option, or value, including an invalid `led stream` line |
 | `128 + n` | Effect, stream, visualizer, or timer countdown stopped by signal `n` (`130` for Ctrl-C) |
 
-A failed command can leave a change partly applied. Run `magsafe reset` to restore the defaults. Errors that sudo reports itself are plain text on standard error, even with `--json`.
+A failed command can leave a change partly applied. Run `magsafe reset` to restore your settings. Errors that sudo reports itself are plain text on standard error, even with `--json`.
 
 ## How it works
 
 - **Color:** the Mac's SMC key `ACLC` selects auto, off, green, or amber.
 - **Brightness and diagnostics:** fixed messages go to the cable through the MagSafe port's AppleHPM controller. The transport accepts only the cable's version, security, and diagnostic addresses.
 - **Firmware check:** diagnostics, brightness, and effects run only when the cable reports firmware exactly 3.2.0. `firmware version` and `led set` work with any version.
+- **Daemon:** the client sends the daemon its command line and its standard input, output, and error over a local socket. The daemon checks the user and the command, runs `magsafe` as a root child with those streams, passes on Ctrl-C, and returns the exit code.
 
 There is no firmware flashing, no raw memory or PWM access, no security or calibration writes, and no RGB colors or factory reset.
 
@@ -249,6 +286,7 @@ Reads, brightness, and a timed alternate blink have worked on that setup. The cu
 - complete blink and fade sequences
 - `led stream` and the visualizer driving the cable
 - the timer and Morse code on the cable
+- the daemon as launchd runs it, and settings applied at plug-in and wake
 - signal cleanup and visible light output
 
 See [CONTRIBUTING.md](CONTRIBUTING.md#hardware-testing) for the full test record.
