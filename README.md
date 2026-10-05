@@ -1,6 +1,6 @@
 # magsafe
 
-Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, run a timer on it, and read the cable's firmware state.
+Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, run a timer on it, send Morse code, and read the cable's firmware state.
 
 ```sh
 magsafe led set amber                 # solid amber
@@ -9,6 +9,7 @@ magsafe led blink alternate -c 6      # flash green and amber in turn
 magsafe led fade green                # breathe until Ctrl-C
 magsafe visualizer                    # pulse to the music until Ctrl-C
 magsafe timer 25m                     # dim as time runs out, then flash
+magsafe morse sos                     # ... --- ... until Ctrl-C
 magsafe reset                         # hand the light back to macOS
 ```
 
@@ -60,6 +61,7 @@ magsafe [options] <command> [<args>]
 | `firmware calibration` | Show the four stored light calibration values |
 | `visualizer [<color>]` | Pulse `green` (the default) or `amber` to the audio that is playing |
 | `timer <duration>` | Count down on the light, then flash amber |
+| `morse <text>` | Send text in green Morse code |
 | `capabilities` | List supported and unavailable functions |
 | `version` | Show the `magsafe` version |
 | `help` | Show help |
@@ -70,8 +72,8 @@ magsafe [options] <command> [<args>]
 | `-n`, `--dry-run` | Check the command and print its plan without touching hardware |
 | `-h`, `--help` | Show help |
 | `--version` | Show the version |
-| `-c`, `--count <n>` | Blink or fade cycles, or timer alarm flashes: 1–300 or `infinite` (default `infinite`) |
-| `-i`, `--interval-ms <ms>` | Blink or timer alarm on and off time, or dark time after each fade cycle: 100–10000 (default 500) |
+| `-c`, `--count <n>` | Blink or fade cycles, timer alarm flashes, or Morse repetitions: 1–300 or `infinite` (default `infinite`) |
+| `-i`, `--interval-ms <ms>` | Blink or timer alarm on and off time, dark time after each fade cycle, or Morse dot time: 100–10000 (default 500, or 150 for Morse) |
 | `-d`, `--duration-ms <ms>` | Time for each fade ramp: 500–60000 (default 1000) |
 | `--preview` | Visualizer only: show the levels in the terminal instead of on the light |
 
@@ -149,6 +151,20 @@ The light counts down without your having to look at a screen:
 A duration is 10 seconds to 24 hours, written as `25m`, `90s`, `1h`, or a combination such as `1h30m`, with the units in that order. A plain number is minutes. The time includes the dark preparation, and counts on while the Mac sleeps. In a terminal, `magsafe` shows the time left.
 
 Ctrl-C during the alarm stops it and exits with 0, since the timer is done, so `&&` works after a timer. Ctrl-C during the countdown stops the timer as it stops an effect, with exit code 130. A finite alarm must take 60 seconds or less: `count × 2 × interval`.
+
+### Morse code
+
+```sh
+magsafe morse sos                      # until Ctrl-C
+magsafe morse hello world -c 1         # once
+magsafe morse "what's up?" -c 3 -i 100 # three times, faster
+```
+
+`morse` sends text in green, in international Morse code with standard timing. A dot lasts one unit and a dash three. The light is dark for one unit between the parts of a character, three between characters, and seven between words and between repetitions. A unit is 150 ms by default, about 8 words a minute; `-i` sets it from 100 ms. In a terminal, `magsafe` types each character as it starts.
+
+Text is any number of words, joined by single spaces and sent in upper case. It may have up to 200 letters, digits, and `. , ? ' ! / ( ) & : ; = + - _ " $ @`. Other characters are invalid. Quote text that the shell would change, and put `--` before text that starts with `-`.
+
+Like an effect, `morse` repeats until Ctrl-C unless you give `--count`, and a finite run must be planned to take 60 seconds or less: `450 + (count × units + (count − 1) × 7) × unit`, where `units` is the length of the text. `--dry-run` shows the code and the planned time.
 
 ### Visualizer
 
@@ -239,6 +255,7 @@ Without `--json`, commands that change the light print nothing on success. Read 
 | `led fade-in`, `led fade-out`, `led fade` | `firmware`, `version_word`, `color`, `fades`, `fade_ms`, `interval_ms`, `pwm_verified`, `brightness_percent`, `system_color_control_requested` |
 | `led stream` | `firmware`, `version_word`, `color`, `values`, `writes`, `brightness_percent`, `system_color_control_requested` |
 | `timer` | `firmware`, `version_word`, `timer_ms`, `flashes`, `brightness_percent`, `system_color_control_requested` |
+| `morse` | `firmware`, `version_word`, `text`, `code`, `repetitions`, `unit_ms`, `brightness_percent`, `system_color_control_requested` |
 | `reset` | `firmware`, `version_word`, `brightness_percent`, `system_color_control_requested` |
 | `capabilities` | `cli_version`, `diagnostic_firmware`, `supported`, `unavailable` (no `command`) |
 
@@ -253,7 +270,7 @@ $ magsafe --json --dry-run led blink alternate -c 6 -i 250
 {"ok":true,"command":"led blink","dry_run":true,"device_calls":0,"color":"alternate","count":6,"interval_ms":250,"preparation_ms":2700,"duration_ms":5700}
 ```
 
-Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`. `led stream` adds `max_rate_hz`, and `visualizer` adds `preview` and `frame_rate_hz`. Both add `preparation_ms` and a `duration_ms` of `null`, except for a preview. `timer` adds `timer_ms`, `warning_ms` (the amber period), `count` and `interval_ms` (the alarm), `preparation_ms`, and `duration_ms`, which is the timer plus a finite alarm.
+Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`. `led stream` adds `max_rate_hz`, and `visualizer` adds `preview` and `frame_rate_hz`. Both add `preparation_ms` and a `duration_ms` of `null`, except for a preview. `timer` adds `timer_ms`, `warning_ms` (the amber period), `count` and `interval_ms` (the alarm), `preparation_ms`, and `duration_ms`, which is the timer plus a finite alarm. `morse` adds `text` and `code`, as the command sends them, `count`, `unit_ms`, `preparation_ms`, and `duration_ms`.
 
 ### Exit codes
 
@@ -278,9 +295,10 @@ There is no firmware flashing, no raw memory or PWM access, no security or calib
 | Source | Role |
 | --- | --- |
 | [`src/main.c`](src/main.c) | Argument parsing, sudo, locking, and output |
-| [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, timer, and reset |
+| [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, timer, Morse, and reset |
 | [`src/stream.c`](src/stream.c) | `led stream` input parsing |
 | [`src/timer.c`](src/timer.c) | Timer durations and dimming schedule |
+| [`src/morse.c`](src/morse.c) | Morse code table, text, and timing |
 | [`src/visualizer.c`](src/visualizer.c) | Visualizer frame loop and latency delay |
 | [`src/analysis.c`](src/analysis.c) | Beat detection, tempo grid, and glow |
 | [`src/audio.m`](src/audio.m) | System audio capture with a Core Audio process tap (Objective-C) |
@@ -303,7 +321,7 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 
 - complete blink and fade sequences
 - `led stream` and the visualizer driving the cable, including how fast the cable accepts brightness changes
-- the timer on the cable; its sequence and signal handling were tested only against stand-in firmware
+- the timer and Morse code on the cable; their sequences, timing, and signal handling were tested only against stand-in firmware
 - sudo passing the visualizer's pipe through to `led stream`
 - signal cleanup
 - visible light output

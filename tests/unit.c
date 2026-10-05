@@ -2,10 +2,11 @@
 // Copyright (c) 2026 Matt Popovich
 
 /* Unit tests for the parts that need no cable, audio, or sudo: the
- * visualizer's analysis, the 'led stream' input parser, and the timer's
- * schedule. */
+ * visualizer's analysis, the 'led stream' input parser, the timer's
+ * schedule, and Morse code. */
 
 #include "analysis.h"
+#include "morse.h"
 #include "stream.h"
 #include "timer.h"
 #include <math.h>
@@ -328,11 +329,70 @@ static void test_timer(void) {
         timer_percent(2000000, 1500000));
 }
 
+/* Morse */
+
+/* Normalize words into text, and expect the text and its code, or an error. */
+static void expect_morse(char *const *words, int count, const char *text, const char *code,
+                         const char *message) {
+  char got[MORSE_TEXT_MAX + 1] = "", rendered[MORSE_TEXT_MAX * 8], error[256] = "";
+  int result = morse_text(words, count, got, error, sizeof(error));
+  if (message) {
+    check(result && !strcmp(error, message), "morse '%s': got error '%s', expected '%s'", words[0],
+          error, message);
+    return;
+  }
+  morse_render(got, rendered, sizeof(rendered));
+  check(!result && !strcmp(got, text) && !strcmp(rendered, code),
+        "morse '%s': got '%s' as '%s' (error '%s'), expected '%s' as '%s'", words[0], got, rendered,
+        error, text, code);
+}
+
+#define WORDS(...)                                                                                 \
+  ((char *[]){__VA_ARGS__}), (int)(sizeof((char *[]){__VA_ARGS__}) / sizeof(char *))
+
+static void test_morse(void) {
+  expect_morse(WORDS("sos"), "SOS", "... --- ...", NULL);
+  expect_morse(WORDS("Hello,", "World"), "HELLO, WORLD",
+               ".... . .-.. .-.. --- --..-- / .-- --- .-. .-.. -..", NULL);
+  expect_morse(WORDS("  a  ", "", "\tb\n"), "A B", ".- / -...", NULL);
+  expect_morse(WORDS("0123456789"), "0123456789",
+               "----- .---- ..--- ...-- ....- ..... -.... --... ---.. ----.", NULL);
+  expect_morse(WORDS(".,?'!/()&:;=+-_\"$@"), ".,?'!/()&:;=+-_\"$@",
+               ".-.-.- --..-- ..--.. .----. -.-.-- -..-. -.--. -.--.- .-... ---... -.-.-. -...- "
+               ".-.-. -....- ..--.- .-..-. ...-..- .--.-.",
+               NULL);
+  expect_morse(
+      WORDS("a#b"), NULL, NULL,
+      "'#' has no Morse code (use letters, digits, and . , ? ' ! / ( ) & : ; = + - _ \" $ @)");
+  expect_morse(WORDS("caf\xc3\xa9"), NULL, NULL,
+               "only letters, digits, and some punctuation have Morse codes");
+  expect_morse(WORDS("   ", ""), NULL, NULL, "nothing to send");
+
+  /* Exactly the limit fits; one more does not. */
+  char longest[MORSE_TEXT_MAX + 2];
+  memset(longest, 'E', MORSE_TEXT_MAX + 1);
+  longest[MORSE_TEXT_MAX] = '\0';
+  char *at_limit[] = {longest}, text[MORSE_TEXT_MAX + 1], error[256] = "";
+  check(!morse_text(at_limit, 1, text, error, sizeof(error)) && strlen(text) == MORSE_TEXT_MAX,
+        "morse: %u characters rejected: %s", MORSE_TEXT_MAX, error);
+  longest[MORSE_TEXT_MAX] = 'E';
+  longest[MORSE_TEXT_MAX + 1] = '\0';
+  check(morse_text(at_limit, 1, text, error, sizeof(error)) != 0, "morse: %u characters accepted",
+        MORSE_TEXT_MAX + 1);
+
+  /* PARIS is the standard word: 50 units with the gap after it. */
+  check(morse_units("PARIS") == 43, "morse: PARIS is %lu units, expected 43", morse_units("PARIS"));
+  check(morse_units("E") == 1, "morse: E is %lu units, expected 1", morse_units("E"));
+  check(morse_units("E E") == 9, "morse: 'E E' is %lu units, expected 9", morse_units("E E"));
+  check(morse_units("EE") == 5, "morse: EE is %lu units, expected 5", morse_units("EE"));
+}
+
 int main(void) {
   make_limited_mix();
   test_analysis();
   test_stream();
   test_timer();
+  test_morse();
   if (failures) {
     printf("%d of %d unit tests failed.\n", failures, tests);
     return 1;

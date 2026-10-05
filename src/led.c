@@ -3,6 +3,7 @@
 
 #include "led.h"
 #include "error.h"
+#include "morse.h"
 #include "stream.h"
 #include "timer.h"
 #include <errno.h>
@@ -308,4 +309,43 @@ int led_timer(FwClient *fw, SmcClient *smc, const LedTimer *timer, unsigned long
   /* Cleanup ignores the stop signal so that it always runs. */
   if (led_reset(fw, smc, error, size)) return -1;
   return status;
+}
+
+/* Each change is scheduled from the start, so slow device calls don't
+ * stretch the timing. */
+int led_morse(FwClient *fw, SmcClient *smc, const LedMorse *morse, unsigned long *sent, char *error,
+              size_t size) {
+  *sent = 0;
+  FwLedState state;
+  /* This read also checks the firmware version before anything changes. */
+  if (fw_read_led(fw, &state, error, size)) return -1;
+  int status = prepare(fw, smc, FW_GREEN, error, size);
+  uint64_t unit = morse->unit_ms * NS_PER_MS, at = now_ns();
+  for (bool first = true; !status && (morse->count == LED_INFINITE || *sent < morse->count);
+       first = false) {
+    if (!first) at += (MORSE_WORD_GAP - 3) * unit;
+    for (const char *p = morse->text; !status && *p; ++p) {
+      if (morse->show) morse->show(morse->context, *p);
+      /* After a character's 3-unit gap, a space makes it a 7-unit word gap. */
+      if (*p == ' ') {
+        at += (MORSE_WORD_GAP - 3) * unit;
+        continue;
+      }
+      for (const char *s = morse_code(*p); !status && *s; ++s) {
+        status = wait_until(at, error, size) || set_brightness(fw, FW_GREEN, 100, error, size);
+        at += (*s == '.' ? 1 : 3) * unit;
+        if (!status)
+          status = wait_until(at, error, size) || set_brightness(fw, FW_GREEN, 0, error, size);
+        at += unit;
+      }
+      at += 2 * unit;
+    }
+    if (!status) {
+      ++*sent;
+      if (morse->show) morse->show(morse->context, '\n');
+    }
+  }
+  /* Cleanup ignores the stop signal so that it always runs. */
+  if (led_reset(fw, smc, error, size)) return -1;
+  return status ? -1 : interrupted(error, size);
 }

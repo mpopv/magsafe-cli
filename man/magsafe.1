@@ -90,6 +90,18 @@ or
 a plain number is minutes.
 Interrupting the alarm exits with 0; interrupting the countdown exits as an
 effect does.
+.It Cm morse Ar text ...
+Send text in green, in international Morse code.
+A dot lasts one unit and a dash three; the light is dark for one unit within a
+character, three between characters, and seven between words and repetitions.
+The unit is
+.Fl -interval-ms ,
+150 ms by default.
+Text may have up to 200 letters, digits, and the punctuation
+.Li ". , ? ' ! / ( ) & : ; = + - _ \(dq $ @" .
+Morse code repeats until interrupted unless
+.Fl -count
+is given.
 .It Cm led get
 Show the light mode, the two PWM outputs, and the color selector.
 .It Cm firmware version
@@ -155,13 +167,14 @@ Show a usage summary.
 .It Fl -version
 Show the version.
 .It Fl c , Fl -count Ar n
-Number of blink or fade cycles, or timer alarm flashes: 1 to 300, or
+Number of blink or fade cycles, timer alarm flashes, or Morse repetitions: 1 to
+300, or
 .Cm infinite
 (the default).
 A finite effect or alarm must be planned to take 60 seconds or less.
 .It Fl i , Fl -interval-ms Ar ms
-Blink or timer alarm on and off time, or dark time after each fade cycle: 100
-to 10000 (default 500).
+Blink or timer alarm on and off time, dark time after each fade cycle, or Morse
+dot time: 100 to 10000 (default 500, or 150 for Morse code).
 .It Fl d , Fl -duration-ms Ar ms
 Time for each fade ramp: 500 to 60000 (default 1000).
 .It Fl -preview
@@ -205,6 +218,9 @@ Pulse amber to the music until Ctrl-C:
 .Pp
 Run a 25-minute timer:
 .Dl $ magsafe timer 25m
+.Pp
+Send SOS three times:
+.Dl $ magsafe morse sos -c 3
 .Pp
 Check audio capture without the cable:
 .Dl $ magsafe visualizer --preview

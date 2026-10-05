@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- `morse <text>` sends text in green, in international Morse code with
+  standard timing. A unit is 150 ms by default, set with `--interval-ms`. It
+  repeats until Ctrl-C unless `--count` is given, and a terminal shows each
+  character as it is sent. Text may have up to 200 letters, digits, and common
+  punctuation.
+- Not yet run on the cable; its sequence, timing, and signal handling were
+  tested against stand-in firmware.
+
 ## [0.9.0] - 2026-10-04
 
 - `timer <duration>` counts down on the light: green dimming as time runs out,

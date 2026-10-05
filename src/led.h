@@ -68,6 +68,21 @@ typedef struct {
   void *context;
 } LedTimer;
 
+typedef struct {
+  const char *text; /* characters with Morse codes, and single spaces */
+  unsigned count;   /* repetitions, or LED_INFINITE */
+  unsigned unit_ms; /* the length of a dot */
+  /* Called as each character starts, with ' ' for a space and '\n' after
+   * each repetition. May be null. */
+  void (*show)(void *context, char character);
+  void *context;
+} LedMorse;
+
+/* Send text in green Morse code, as morse.h describes, then led_reset.
+ * Repetitions are a word apart. *sent is the number of whole repetitions. */
+int led_morse(FwClient *fw, SmcClient *smc, const LedMorse *morse, unsigned long *sent, char *error,
+              size_t size);
+
 /* Count down on the light, as timer.h describes, then flash amber count
  * times, or until a stop signal, which acknowledges the alarm instead of
  * failing. Then led_reset. *flashes is the number of alarm flashes. */

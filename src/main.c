@@ -6,6 +6,7 @@
 #include "error.h"
 #include "firmware.h"
 #include "led.h"
+#include "morse.h"
 #include "timer.h"
 #include "visualizer.h"
 #include <errno.h>
@@ -51,6 +52,7 @@ static const char help_text[] =
     "  firmware calibration          Show the four stored light calibration values\n"
     "  visualizer [<color>]          Pulse green (default) or amber to the playing audio\n"
     "  timer <duration>              Count down on the light, then flash amber\n"
+    "  morse <text>                  Send text in green Morse code\n"
     "  capabilities                  List supported and unavailable functions\n"
     "  version                       Show the magsafe version\n"
     "  help                          Show this help\n"
@@ -61,11 +63,12 @@ static const char help_text[] =
     "  -h, --help                    Show this help\n"
     "      --version                 Show the magsafe version\n"
     "\n"
-    "Blink, fade, and timer options:\n"
-    "  -c, --count <n>               Cycles or alarm flashes, 1-300 or infinite\n"
-    "                                (default infinite)\n"
-    "  -i, --interval-ms <ms>        Blink or alarm on/off time, or dark time after\n"
-    "                                each fade cycle, 100-10000 (default 500)\n"
+    "Blink, fade, timer, and Morse options:\n"
+    "  -c, --count <n>               Cycles, alarm flashes, or Morse repetitions,\n"
+    "                                1-300 or infinite (default infinite)\n"
+    "  -i, --interval-ms <ms>        Blink or alarm on/off time, dark time after each\n"
+    "                                fade cycle, or Morse dot time, 100-10000\n"
+    "                                (default 500, or 150 for Morse)\n"
     "  -d, --duration-ms <ms>        Fade ramp time, 500-60000 (default 1000)\n"
     "\n"
     "Visualizer options:\n"
@@ -77,6 +80,7 @@ static const char help_text[] =
     "A timer takes 10s to 24h, such as 25m, 90s, or 1h30m; a plain number is\n"
     "minutes. It dims green as time runs out and turns amber for the last fifth,\n"
     "at most 5 minutes. Its alarm flashes until --count or Ctrl-C, which exits 0.\n"
+    "Morse takes letters, digits, and . , ? ' ! / ( ) & : ; = + - _ \" $ @.\n"
     "Every effect, stream, timer, and visualizer finishes with a reset. The\n"
     "visualizer needs System Audio Recording permission for your terminal app,\n"
     "and macOS 14.2 or later.\n"
@@ -102,6 +106,7 @@ typedef enum {
   CMD_LED_STREAM,
   CMD_VISUALIZER,
   CMD_TIMER,
+  CMD_MORSE,
 } Command;
 
 static const struct {
@@ -127,6 +132,7 @@ static const struct {
     [CMD_LED_STREAM] = {"led stream", " <color>", 1, 1},
     [CMD_VISUALIZER] = {"visualizer", " [<color>] [--preview]", 0, 1},
     [CMD_TIMER] = {"timer", " <duration> [-c <n>] [-i <ms>]", 1, 1},
+    [CMD_MORSE] = {"morse", " <text>... [-c <n>] [-i <ms>]", 1, 64},
 };
 
 static const char *const mode_names[] = {[SMC_LED_AUTO] = "auto",
@@ -145,6 +151,7 @@ typedef struct {
   FwColor color;        /* led brightness, blink, fades, stream, and visualizer */
   bool alternate;       /* led blink alternate */
   unsigned long timer_ms;
+  char text[MORSE_TEXT_MAX + 1]; /* morse */
   unsigned count, interval_ms, duration_ms;
 } Options;
 
@@ -173,7 +180,7 @@ static unsigned long total_ms(const Options *o) {
 static bool json_output;
 static struct {
   const char *key;
-  char value[256];
+  char value[MORSE_TEXT_MAX * 8]; /* long enough for Morse code */
 } lines[16];
 static size_t line_count;
 
@@ -388,6 +395,27 @@ static int parse_timer(Options *o, const char *text, const char *count, const ch
   return 0;
 }
 
+#define MORSE_UNIT_MS 150u
+
+/* Planned time of a finite Morse run, including preparation. */
+static unsigned long morse_ms(const Options *o) {
+  return LED_PREPARE_MS +
+         (o->count * morse_units(o->text) + (o->count - 1ul) * MORSE_WORD_GAP) * o->interval_ms;
+}
+
+static int parse_morse(Options *o, char **words, int count_words, const char *count,
+                       const char *interval, char *error, size_t size) {
+  if (morse_text(words, count_words, o->text, error, size)) return -1;
+  if (!interval) o->interval_ms = MORSE_UNIT_MS;
+  if (parse_repeat(o, count, interval, NULL, error, size)) return -1;
+  if (o->count != LED_INFINITE && morse_ms(o) > MAX_TOTAL_MS)
+    return fail(error, size,
+                "planned run time is %lu ms; finite effects are limited to %u ms "
+                "(omit --count to repeat until stopped, or shorten the text or --interval-ms)",
+                morse_ms(o), MAX_TOTAL_MS);
+  return 0;
+}
+
 static void set_once(const char **value, const char *flag, char *error, size_t size) {
   if (*value && !*error) fail(error, size, "%s given more than once", flag);
   *value = optarg;
@@ -447,10 +475,10 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
   int given = words - used;
   if (given < commands[o->command].min_arguments || given > commands[o->command].max_arguments)
     return fail(error, size, "usage: magsafe %s%s", name, commands[o->command].usage);
-  bool timer = o->command == CMD_TIMER;
-  if (!is_effect(o->command) && !timer && (count || interval || duration))
-    return fail(error, size, "blink, fade, and timer options do not apply to '%s'", name);
-  if ((o->command == CMD_LED_BLINK || timer) && duration)
+  bool repeats = is_effect(o->command) || o->command == CMD_TIMER || o->command == CMD_MORSE;
+  if (!repeats && (count || interval || duration))
+    return fail(error, size, "blink, fade, timer, and Morse options do not apply to '%s'", name);
+  if (repeats && !is_fade(o->command) && duration)
     return fail(error, size, "--duration-ms applies only to fade commands");
   if (o->preview && o->command != CMD_VISUALIZER)
     return fail(error, size, "--preview applies only to 'visualizer'");
@@ -480,6 +508,7 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
     case CMD_LED_FADE_OUT:
     case CMD_LED_FADE: return parse_effect(o, args[0], count, interval, duration, error, size);
     case CMD_TIMER: return parse_timer(o, args[0], count, interval, error, size);
+    case CMD_MORSE: return parse_morse(o, args, given, count, interval, error, size);
     default: return 0;
   }
 }
@@ -502,6 +531,7 @@ static void capabilities(void) {
                                           "brightness-stream",
                                           "visualizer",
                                           "timer",
+                                          "morse",
                                           "volatile-brightness",
                                           "reset"};
   static const char *const unavailable[] = {"firmware-flash", "security-write", "calibration-write",
@@ -519,7 +549,8 @@ static void dry_run(const Options *o) {
   begin(commands[o->command].name);
   put_bool("dry_run", true);
   put_number("device_calls", 0);
-  if (o->argument && o->command != CMD_TIMER) put_string("color", o->argument);
+  if (o->argument && o->command != CMD_TIMER && o->command != CMD_MORSE)
+    put_string("color", o->argument);
   if (o->command == CMD_LED_BRIGHTNESS) put_number("percent", o->percent);
   if (is_effect(o->command)) {
     bool infinite = o->count == LED_INFINITE;
@@ -542,6 +573,18 @@ static void dry_run(const Options *o) {
     put_number("preparation_ms", LED_PREPARE_MS);
     if (infinite) put_null("duration_ms");
     else put_number("duration_ms", o->timer_ms + alarm_ms(o));
+  }
+  if (o->command == CMD_MORSE) {
+    char code[MORSE_TEXT_MAX * 8];
+    morse_render(o->text, code, sizeof(code));
+    put_string("text", o->text);
+    put_string("code", code);
+    if (o->count == LED_INFINITE) put_string("count", "infinite");
+    else put_number("count", o->count);
+    put_number("unit_ms", o->interval_ms);
+    put_number("preparation_ms", LED_PREPARE_MS);
+    if (o->count == LED_INFINITE) put_null("duration_ms");
+    else put_number("duration_ms", morse_ms(o));
   }
   if (o->command == CMD_LED_STREAM) put_number("max_rate_hz", LED_STREAM_HZ);
   if (o->command == CMD_VISUALIZER) {
@@ -608,6 +651,12 @@ static bool invalid_input; /* led stream stopped at an invalid line */
 typedef struct {
   bool infinite, drawn;
 } Countdown;
+
+/* Type each character on a terminal as it is sent. */
+static void show_morse(void *context, char character) {
+  *(bool *)context = character != '\n';
+  fputc(character, stderr);
+}
 
 /* Show the time left on a terminal, then the alarm. */
 static void show_timer(void *context, unsigned long remaining_ms, bool alarm) {
@@ -756,6 +805,31 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
       put_firmware(fw);
       put_number("timer_ms", o->timer_ms);
       put_number("flashes", flashes);
+      put_number("brightness_percent", 100);
+      put_bool("system_color_control_requested", true);
+      end();
+      return 0;
+    }
+
+    case CMD_MORSE: {
+      bool typing = false;
+      LedMorse morse = {
+          .text = o->text, .count = o->count, .unit_ms = o->interval_ms, .context = &typing};
+      if (!json_output && isatty(STDERR_FILENO)) morse.show = show_morse;
+      unsigned long sent = 0;
+      int result = fw_open(fw, error, size) || smc_open(smc, error, size) ||
+                   led_catch_signals(error, size) || led_morse(fw, smc, &morse, &sent, error, size);
+      if (typing) fputc('\n', stderr);
+      if (result) return -1;
+      if (!json_output) return 0;
+      char code[MORSE_TEXT_MAX * 8];
+      morse_render(o->text, code, sizeof(code));
+      begin(name);
+      put_firmware(fw);
+      put_string("text", o->text);
+      put_string("code", code);
+      put_number("repetitions", sent);
+      put_number("unit_ms", o->interval_ms);
       put_number("brightness_percent", 100);
       put_bool("system_color_control_requested", true);
       end();
