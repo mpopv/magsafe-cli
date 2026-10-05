@@ -10,7 +10,7 @@ OBJC_SOURCES = $(wildcard src/*.m)
 HEADERS = $(wildcard src/*.h)
 OBJECTS = $(C_SOURCES:src/%.c=build/%.o) $(OBJC_SOURCES:src/%.m=build/%.o)
 # The parts that need no hardware, audio, or sudo, for the unit tests.
-UNIT_SOURCES = tests/unit.c src/analysis.c src/stream.c
+UNIT_SOURCES = tests/unit.c src/analysis.c src/stream.c src/timer.c
 
 .PHONY: all test install uninstall format clean
 

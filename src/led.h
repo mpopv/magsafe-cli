@@ -58,4 +58,20 @@ typedef struct {
 int led_stream(FwClient *fw, SmcClient *smc, FwColor color, int input, LedStreamResult *result,
                char *error, size_t size);
 
+typedef struct {
+  unsigned long duration_ms;
+  unsigned count;       /* alarm flashes, or LED_INFINITE */
+  unsigned interval_ms; /* alarm flash on and off time */
+  /* Called when the whole seconds left change, and once when the alarm
+   * starts. May be null. */
+  void (*show)(void *context, unsigned long remaining_ms, bool alarm);
+  void *context;
+} LedTimer;
+
+/* Count down on the light, as timer.h describes, then flash amber count
+ * times, or until a stop signal, which acknowledges the alarm instead of
+ * failing. Then led_reset. *flashes is the number of alarm flashes. */
+int led_timer(FwClient *fw, SmcClient *smc, const LedTimer *timer, unsigned long *flashes,
+              char *error, size_t size);
+
 #endif

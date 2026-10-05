@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- `timer <duration>` counts down on the light: green dimming as time runs out,
+  amber for the last fifth (at most 5 minutes), then amber flashes until Ctrl-C
+  or `--count` flashes. Durations such as `25m`, `90s`, and `1h30m` run from
+  10 seconds to 24 hours, and a plain number is minutes. A terminal shows the
+  time left. Ctrl-C during the alarm exits with 0.
+- Not yet run on the cable; its sequence and signal handling were tested
+  against stand-in firmware.
+
 ## [0.8.0] - 2026-10-04
 
 - The visualizer flashes with the kick drum and falls to a dim glow between

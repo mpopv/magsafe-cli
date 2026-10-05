@@ -78,7 +78,13 @@ expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"g
   --json -n visualizer
 expect 0 "{$dry:\"visualizer\",\"dry_run\":true,\"device_calls\":0,\"color\":\"amber\",\"preview\":true,\"frame_rate_hz\":30}" \
   --json -n visualizer amber --preview
-expect 0 '{"ok":true,*"supported":*"brightness-stream","visualizer"*"unavailable":*}' --json capabilities
+expect 0 '{"ok":true,*"supported":*"brightness-stream","visualizer","timer"*"unavailable":*}' --json capabilities
+expect 0 "{$dry:\"timer\",\"dry_run\":true,\"device_calls\":0,\"timer_ms\":1500000,\"warning_ms\":300000,\"count\":\"infinite\",\"interval_ms\":500,\"preparation_ms\":450,\"duration_ms\":null}" \
+  --json -n timer 25m
+expect 0 "{$dry:\"timer\",\"dry_run\":true,\"device_calls\":0,\"timer_ms\":5400000,\"warning_ms\":300000,\"count\":10,\"interval_ms\":250,\"preparation_ms\":450,\"duration_ms\":5405000}" \
+  --json -n timer 1h30m -c 10 -i 250
+expect 0 "{$dry:\"timer\",*\"timer_ms\":2700000,*}" --json -n timer 45
+expect 0 "{$dry:\"timer\",*\"timer_ms\":90000,\"warning_ms\":18000,*}" --json -n timer 90s
 
 # Usage errors
 expect_error "unknown command 'spin'" spin
@@ -98,18 +104,25 @@ expect_error "invalid --duration-ms '100' (expected 500-60000)" led fade green -
 expect_error "planned run time is 60450 ms; finite effects are limited to 60000 ms (omit --count to run until stopped)" \
   led blink green -c 60
 expect_error "--duration-ms applies only to fade commands" led blink green -d 1000
-expect_error "blink and fade options do not apply to 'status'" status -c 3
+expect_error "blink, fade, and timer options do not apply to 'status'" status -c 3
 expect_error "--count given more than once" led blink green -c 3 --count 4
 expect_error "option '--count' needs a value" led blink green --count
 expect_error "usage: magsafe led stream <color>" led stream
 expect_error "invalid color 'alternate' (expected green or amber)" led stream alternate
-expect_error "blink and fade options do not apply to 'led stream'" led stream green -i 200
+expect_error "blink, fade, and timer options do not apply to 'led stream'" led stream green -i 200
 expect_error "invalid color 'red' (expected green or amber)" visualizer red
 # Brackets are escaped because expected output is a shell pattern.
 expect_error "usage: magsafe visualizer \\[<color>\\] \\[--preview\\]" visualizer green amber
-expect_error "blink and fade options do not apply to 'visualizer'" visualizer -c 3
+expect_error "blink, fade, and timer options do not apply to 'visualizer'" visualizer -c 3
 expect_error "--preview applies only to 'visualizer'" led stream green --preview
 expect_error "--preview applies only to 'visualizer'" status --preview
+expect_error "invalid duration '5s' (expected 10s-24h, such as 25m, 90s, or 1h30m)" timer 5s
+expect_error "invalid duration '30m1h' (expected 10s-24h, such as 25m, 90s, or 1h30m)" timer 30m1h
+expect_error "invalid duration '25h' (expected 10s-24h, such as 25m, 90s, or 1h30m)" timer 25h
+expect_error "usage: magsafe timer <duration> \\[-c <n>\\] \\[-i <ms>\\]" timer
+expect_error "--duration-ms applies only to fade commands" timer 25m -d 1000
+expect_error "planned alarm time is 400000 ms; finite alarms are limited to 60000 ms (omit --count to flash until stopped)" \
+  timer 25m -c 200 -i 1000
 expect_error "invalid option '--bogus'" --bogus status
 expect 2 '{"ok":false,"error":"invalid option '"'"'--bogus'"'"'"}' -n --bogus status --json
 expect 2 '' -n spin

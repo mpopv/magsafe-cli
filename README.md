@@ -1,6 +1,6 @@
 # magsafe
 
-Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, and read the cable's firmware state.
+Control the light on Apple's USB-C to MagSafe 3 cable (A2363) from the macOS command line. Set its color, dim it, blink or fade it, pulse it to whatever is playing, run a timer on it, and read the cable's firmware state.
 
 ```sh
 magsafe led set amber                 # solid amber
@@ -8,6 +8,7 @@ magsafe led brightness green 25       # dim green
 magsafe led blink alternate -c 6      # flash green and amber in turn
 magsafe led fade green                # breathe until Ctrl-C
 magsafe visualizer                    # pulse to the music until Ctrl-C
+magsafe timer 25m                     # dim as time runs out, then flash
 magsafe reset                         # hand the light back to macOS
 ```
 
@@ -58,6 +59,7 @@ magsafe [options] <command> [<args>]
 | `firmware security` | Show the configuration-setter lock and signature-skip flags |
 | `firmware calibration` | Show the four stored light calibration values |
 | `visualizer [<color>]` | Pulse `green` (the default) or `amber` to the audio that is playing |
+| `timer <duration>` | Count down on the light, then flash amber |
 | `capabilities` | List supported and unavailable functions |
 | `version` | Show the `magsafe` version |
 | `help` | Show help |
@@ -68,8 +70,8 @@ magsafe [options] <command> [<args>]
 | `-n`, `--dry-run` | Check the command and print its plan without touching hardware |
 | `-h`, `--help` | Show help |
 | `--version` | Show the version |
-| `-c`, `--count <n>` | Blink or fade cycles: 1–300 or `infinite` (default `infinite`) |
-| `-i`, `--interval-ms <ms>` | Blink on and off time, or dark time after each fade cycle: 100–10000 (default 500) |
+| `-c`, `--count <n>` | Blink or fade cycles, or timer alarm flashes: 1–300 or `infinite` (default `infinite`) |
+| `-i`, `--interval-ms <ms>` | Blink or timer alarm on and off time, or dark time after each fade cycle: 100–10000 (default 500) |
 | `-d`, `--duration-ms <ms>` | Time for each fade ramp: 500–60000 (default 1000) |
 | `--preview` | Visualizer only: show the levels in the terminal instead of on the light |
 
@@ -128,6 +130,25 @@ An effect repeats until Ctrl-C (exit code 130) or a device error unless you give
 | `led fade` | `450 + count × (2 × duration + interval)` |
 
 Preparation is 450 ms, or `count × 450` ms for `alternate`. Device calls add some time beyond the plan. `--dry-run` shows the planned total. For a longer run, leave out `--count`.
+
+### Timer
+
+```sh
+magsafe timer 25m                 # a Pomodoro
+magsafe timer 1h30m
+magsafe timer 90s -c 10 -i 250    # 10 quick flashes at the end, then exit
+magsafe timer 5 && say "break's over"
+```
+
+The light counts down without your having to look at a screen:
+
+1. It lights green at full brightness and dims at an even rate as time runs out, to about a third at the end.
+2. For the last fifth of the time, at most the last 5 minutes, it switches to amber and keeps dimming. The switch takes the usual 450 ms in the dark, and so does the start.
+3. At zero, it flashes amber until Ctrl-C, or for `--count` flashes, then runs `reset`.
+
+A duration is 10 seconds to 24 hours, written as `25m`, `90s`, `1h`, or a combination such as `1h30m`, with the units in that order. A plain number is minutes. The time includes the dark preparation, and counts on while the Mac sleeps. In a terminal, `magsafe` shows the time left.
+
+Ctrl-C during the alarm stops it and exits with 0, since the timer is done, so `&&` works after a timer. Ctrl-C during the countdown stops the timer as it stops an effect, with exit code 130. A finite alarm must take 60 seconds or less: `count × 2 × interval`.
 
 ### Visualizer
 
@@ -217,6 +238,7 @@ Without `--json`, commands that change the light print nothing on success. Read 
 | `led blink` | `firmware`, `version_word`, `color`, `flashes`, `brightness_percent`, `system_color_control_requested` |
 | `led fade-in`, `led fade-out`, `led fade` | `firmware`, `version_word`, `color`, `fades`, `fade_ms`, `interval_ms`, `pwm_verified`, `brightness_percent`, `system_color_control_requested` |
 | `led stream` | `firmware`, `version_word`, `color`, `values`, `writes`, `brightness_percent`, `system_color_control_requested` |
+| `timer` | `firmware`, `version_word`, `timer_ms`, `flashes`, `brightness_percent`, `system_color_control_requested` |
 | `reset` | `firmware`, `version_word`, `brightness_percent`, `system_color_control_requested` |
 | `capabilities` | `cli_version`, `diagnostic_firmware`, `supported`, `unavailable` (no `command`) |
 
@@ -231,16 +253,16 @@ $ magsafe --json --dry-run led blink alternate -c 6 -i 250
 {"ok":true,"command":"led blink","dry_run":true,"device_calls":0,"color":"alternate","count":6,"interval_ms":250,"preparation_ms":2700,"duration_ms":5700}
 ```
 
-Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`. `led stream` adds `max_rate_hz`, and `visualizer` adds `preview` and `frame_rate_hz`. Both add `preparation_ms` and a `duration_ms` of `null`, except for a preview.
+Effects add `count`, `interval_ms`, `fade_ms` (fades only), `preparation_ms`, and `duration_ms`, which is the planned total. For an infinite run, the default, `count` is `"infinite"` and unbounded times are `null`. `led stream` adds `max_rate_hz`, and `visualizer` adds `preview` and `frame_rate_hz`. Both add `preparation_ms` and a `duration_ms` of `null`, except for a preview. `timer` adds `timer_ms`, `warning_ms` (the amber period), `count` and `interval_ms` (the alarm), `preparation_ms`, and `duration_ms`, which is the timer plus a finite alarm.
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success |
+| `0` | Success, including a timer alarm stopped with Ctrl-C |
 | `1` | Device, permission, or lock error |
 | `2` | Invalid command, option, or value, including an invalid `led stream` line |
-| `128 + n` | Effect, stream, or visualizer stopped by signal `n` (`130` for Ctrl-C) |
+| `128 + n` | Effect, stream, visualizer, or timer countdown stopped by signal `n` (`130` for Ctrl-C) |
 
 A failed command can leave a change partly applied. Run `magsafe reset` to restore the defaults. Errors that sudo reports itself are plain text on standard error, even with `--json`.
 
@@ -256,8 +278,9 @@ There is no firmware flashing, no raw memory or PWM access, no security or calib
 | Source | Role |
 | --- | --- |
 | [`src/main.c`](src/main.c) | Argument parsing, sudo, locking, and output |
-| [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, and reset |
+| [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, timer, and reset |
 | [`src/stream.c`](src/stream.c) | `led stream` input parsing |
+| [`src/timer.c`](src/timer.c) | Timer durations and dimming schedule |
 | [`src/visualizer.c`](src/visualizer.c) | Visualizer frame loop and latency delay |
 | [`src/analysis.c`](src/analysis.c) | Beat detection, tempo grid, and glow |
 | [`src/audio.m`](src/audio.m) | System audio capture with a Core Audio process tap (Objective-C) |
@@ -280,6 +303,7 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 
 - complete blink and fade sequences
 - `led stream` and the visualizer driving the cable, including how fast the cable accepts brightness changes
+- the timer on the cable; its sequence and signal handling were tested only against stand-in firmware
 - sudo passing the visualizer's pipe through to `led stream`
 - signal cleanup
 - visible light output

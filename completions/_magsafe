@@ -8,7 +8,7 @@ _magsafe() {
   local -A opt_args
 
   effect_options=(
-    '(-c --count)'{-c+,--count=}'[number of cycles]:count:(infinite)'
+    '(-c --count)'{-c+,--count=}'[number of cycles or alarm flashes]:count:(infinite)'
     '(-i --interval-ms)'{-i+,--interval-ms=}'[on/off or dark time in ms (100-10000)]:milliseconds'
     '(-d --duration-ms)'{-d+,--duration-ms=}'[fade ramp time in ms (500-60000)]:milliseconds'
   )
@@ -31,6 +31,7 @@ _magsafe() {
         'led:set, dim, blink, fade, stream, or read the light'
         'firmware:read cable firmware data'
         'visualizer:pulse the light to the audio that is playing'
+        'timer:count down on the light, then flash amber'
         'capabilities:list supported and unavailable functions'
         'version:show the magsafe version'
         'help:show help'
@@ -64,6 +65,9 @@ _magsafe() {
           ;;
         visualizer)
           (( CURRENT == 2 )) && _values color green amber && ret=0
+          ;;
+        timer)
+          (( CURRENT == 2 )) && _message 'duration (such as 25m, 90s, or 1h30m)' && ret=0
           ;;
         firmware)
           if (( CURRENT == 2 )); then

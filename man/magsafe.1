@@ -75,6 +75,21 @@ the input ends.
 Spaces around a number are allowed and blank lines are skipped.
 Only the newest value is used, at most 40 times a second, and the color is
 checked every 5 seconds.
+.It Cm timer Ar duration
+Count down on the light.
+It lights green and dims as time runs out, switches to amber for the last fifth
+of the time, at most 5 minutes, then flashes amber until interrupted or for
+.Fl -count
+flashes.
+.Ar duration
+is 10 seconds to 24 hours, such as
+.Cm 25m ,
+.Cm 90s ,
+or
+.Cm 1h30m ;
+a plain number is minutes.
+Interrupting the alarm exits with 0; interrupting the countdown exits as an
+effect does.
 .It Cm led get
 Show the light mode, the two PWM outputs, and the color selector.
 .It Cm firmware version
@@ -140,13 +155,13 @@ Show a usage summary.
 .It Fl -version
 Show the version.
 .It Fl c , Fl -count Ar n
-Number of blink or fade cycles: 1 to 300, or
+Number of blink or fade cycles, or timer alarm flashes: 1 to 300, or
 .Cm infinite
 (the default).
-A finite effect must be planned to take 60 seconds or less.
+A finite effect or alarm must be planned to take 60 seconds or less.
 .It Fl i , Fl -interval-ms Ar ms
-Blink on and off time, or dark time after each fade cycle: 100 to 10000
-(default 500).
+Blink or timer alarm on and off time, or dark time after each fade cycle: 100
+to 10000 (default 500).
 .It Fl d , Fl -duration-ms Ar ms
 Time for each fade ramp: 500 to 60000 (default 1000).
 .It Fl -preview
@@ -163,7 +178,7 @@ Lock held while a hardware command runs.
 .Sh EXIT STATUS
 .Bl -tag -width Ds
 .It 0
-Success.
+Success, including a timer alarm that was interrupted.
 .It 1
 Device, permission, or lock error.
 .It 2
@@ -171,7 +186,7 @@ Invalid command, option, or value, including an invalid
 .Cm led stream
 line.
 .It 128 + Ar n
-An effect, stream, or visualizer stopped by signal
+An effect, stream, visualizer, or timer countdown stopped by signal
 .Ar n ,
 such as 130 for Ctrl-C.
 .El
@@ -187,6 +202,9 @@ Fade amber up and down until Ctrl-C:
 .Pp
 Pulse amber to the music until Ctrl-C:
 .Dl $ magsafe visualizer amber
+.Pp
+Run a 25-minute timer:
+.Dl $ magsafe timer 25m
 .Pp
 Check audio capture without the cable:
 .Dl $ magsafe visualizer --preview

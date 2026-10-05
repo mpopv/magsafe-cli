@@ -2,10 +2,12 @@
 // Copyright (c) 2026 Matt Popovich
 
 /* Unit tests for the parts that need no cable, audio, or sudo: the
- * visualizer's analysis and the 'led stream' input parser. */
+ * visualizer's analysis, the 'led stream' input parser, and the timer's
+ * schedule. */
 
 #include "analysis.h"
 #include "stream.h"
+#include "timer.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -259,10 +261,78 @@ static void test_stream(void) {
                 "line 1 is too long (expected a brightness of 0-100)");
 }
 
+/* Timer */
+
+static void expect_duration(const char *text, long milliseconds) {
+  unsigned long got = 0;
+  int result = timer_parse(text, &got);
+  if (milliseconds < 0)
+    check(result != 0, "timer '%s': parsed as %lu ms, expected an error", text, got);
+  else
+    check(!result && got == (unsigned long)milliseconds,
+          "timer '%s': got %lu ms (result %d), expected %ld", text, got, result, milliseconds);
+}
+
+static void expect_format(unsigned long milliseconds, const char *expected) {
+  char text[16];
+  timer_format(milliseconds, text, sizeof(text));
+  check(!strcmp(text, expected), "timer format %lu ms: got '%s', expected '%s'", milliseconds, text,
+        expected);
+}
+
+static void test_timer(void) {
+  expect_duration("25m", 1500000);
+  expect_duration("45", 2700000);
+  expect_duration("90s", 90000);
+  expect_duration("1h", 3600000);
+  expect_duration("1h30m", 5400000);
+  expect_duration("1m90s", 150000);
+  expect_duration("2h0m5s", 7205000);
+  expect_duration("24h", 86400000);
+  expect_duration("0", 0); /* too short, which the caller checks */
+  expect_duration("25h", -1);
+  expect_duration("1441", -1);
+  expect_duration("30m1h", -1);
+  expect_duration("1h30", -1);
+  expect_duration("1m1m", -1);
+  expect_duration("25mm", -1);
+  expect_duration("1.5h", -1);
+  expect_duration("+5m", -1);
+  expect_duration("m", -1);
+  expect_duration("", -1);
+  expect_duration("99999999999999999999h", -1);
+
+  expect_format(0, "0:00");
+  expect_format(1, "0:01");
+  expect_format(59001, "1:00");
+  expect_format(1500000, "25:00");
+  expect_format(5400000, "1:30:00");
+
+  check(timer_warning_ms(1500000) == 300000, "25 min warning: %lu ms", timer_warning_ms(1500000));
+  check(timer_warning_ms(3600000) == 300000, "1 h warning: %lu ms", timer_warning_ms(3600000));
+  check(timer_warning_ms(60000) == 12000, "1 min warning: %lu ms", timer_warning_ms(60000));
+
+  /* Full at the start, dimming without ever brightening, to about a third
+   * perceived (7%) at the end. */
+  unsigned previous = 100;
+  bool steady = timer_percent(0, 1500000) == 100;
+  for (unsigned long t = 0; t <= 1500000; t += 15000) {
+    unsigned percent = timer_percent(t, 1500000);
+    steady &= percent <= previous;
+    previous = percent;
+  }
+  check(steady, "timer dims from 100%% without brightening");
+  check(timer_percent(1500000, 1500000) == 7, "timer ends at %u%%, expected 7%%",
+        timer_percent(1500000, 1500000));
+  check(timer_percent(2000000, 1500000) == 7, "timer past its end: %u%%",
+        timer_percent(2000000, 1500000));
+}
+
 int main(void) {
   make_limited_mix();
   test_analysis();
   test_stream();
+  test_timer();
   if (failures) {
     printf("%d of %d unit tests failed.\n", failures, tests);
     return 1;

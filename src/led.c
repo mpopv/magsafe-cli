@@ -4,7 +4,9 @@
 #include "led.h"
 #include "error.h"
 #include "stream.h"
+#include "timer.h"
 #include <errno.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,6 +20,7 @@
 #define VERIFY_TIMEOUT_MS 2000u
 #define STREAM_CHECK_MS 5000u
 #define STREAM_WAKE_MS 100u /* longest wait, so a stop signal is seen promptly */
+#define TIMER_STEP_MS 100u
 
 volatile sig_atomic_t led_stop_signal;
 
@@ -245,4 +248,64 @@ int led_stream(FwClient *fw, SmcClient *smc, FwColor color, int input, LedStream
   /* Cleanup ignores the stop signal so that it always runs. */
   if (led_reset(fw, smc, error, size)) return -1;
   return status ? -1 : interrupted(error, size);
+}
+
+/* Flash amber until count flashes or a stop signal, which acknowledges the
+ * alarm. Amber is already selected. */
+static int sound_alarm(FwClient *fw, const LedTimer *timer, unsigned long *flashes, char *error,
+                       size_t size) {
+  while (!led_stop_signal && (timer->count == LED_INFINITE || *flashes < timer->count)) {
+    if (fw_set_brightness(fw, FW_AMBER, 100, error, size)) return -1;
+    ++*flashes;
+    wait_ms(timer->interval_ms, NULL, 0);
+    if (fw_set_brightness(fw, FW_AMBER, 0, error, size)) return -1;
+    wait_ms(timer->interval_ms, NULL, 0);
+  }
+  return 0;
+}
+
+int led_timer(FwClient *fw, SmcClient *smc, const LedTimer *timer, unsigned long *flashes,
+              char *error, size_t size) {
+  *flashes = 0;
+  FwLedState state;
+  /* This read also checks the firmware version before anything changes. */
+  if (fw_read_led(fw, &state, error, size)) return -1;
+  uint64_t start = now_ns(), end = start + timer->duration_ms * NS_PER_MS;
+  unsigned long warning_ms = timer_warning_ms(timer->duration_ms), shown = ULONG_MAX;
+  FwColor color = FW_GREEN;
+  unsigned current = 0; /* prepare leaves both scales at 0% */
+  int status = prepare(fw, smc, color, error, size);
+  uint64_t next_check = now_ns() + STREAM_CHECK_MS * NS_PER_MS;
+  for (uint64_t now; !status && (now = now_ns()) < end;) {
+    unsigned long elapsed = (unsigned long)((now - start) / NS_PER_MS);
+    unsigned long remaining = timer->duration_ms - elapsed;
+    if (timer->show && (remaining + 999) / 1000 != shown) {
+      shown = (remaining + 999) / 1000;
+      timer->show(timer->context, remaining, false);
+    }
+    /* The warning period switches to amber, in the dark as always. */
+    if (color == FW_GREEN && remaining <= warning_ms) {
+      color = FW_AMBER;
+      current = 0;
+      status = prepare(fw, smc, color, error, size);
+      continue;
+    }
+    unsigned percent = timer_percent(elapsed, timer->duration_ms);
+    if (percent != current) {
+      status = set_brightness(fw, color, percent, error, size);
+      current = percent;
+    }
+    if (!status && now >= next_check) {
+      status = check_color(fw, color, error, size);
+      next_check = now_ns() + STREAM_CHECK_MS * NS_PER_MS;
+    }
+    if (!status) status = wait_ms(TIMER_STEP_MS, error, size);
+  }
+  if (!status) {
+    if (timer->show) timer->show(timer->context, 0, true);
+    status = sound_alarm(fw, timer, flashes, error, size);
+  }
+  /* Cleanup ignores the stop signal so that it always runs. */
+  if (led_reset(fw, smc, error, size)) return -1;
+  return status;
 }

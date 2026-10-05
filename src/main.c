@@ -6,6 +6,7 @@
 #include "error.h"
 #include "firmware.h"
 #include "led.h"
+#include "timer.h"
 #include "visualizer.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -49,6 +50,7 @@ static const char help_text[] =
     "  firmware security             Show the setter lock and signature-skip flags\n"
     "  firmware calibration          Show the four stored light calibration values\n"
     "  visualizer [<color>]          Pulse green (default) or amber to the playing audio\n"
+    "  timer <duration>              Count down on the light, then flash amber\n"
     "  capabilities                  List supported and unavailable functions\n"
     "  version                       Show the magsafe version\n"
     "  help                          Show this help\n"
@@ -59,10 +61,11 @@ static const char help_text[] =
     "  -h, --help                    Show this help\n"
     "      --version                 Show the magsafe version\n"
     "\n"
-    "Blink and fade options:\n"
-    "  -c, --count <n>               Cycles, 1-300 or infinite (default infinite)\n"
-    "  -i, --interval-ms <ms>        Blink on/off time, or dark time after each fade\n"
-    "                                cycle, 100-10000 (default 500)\n"
+    "Blink, fade, and timer options:\n"
+    "  -c, --count <n>               Cycles or alarm flashes, 1-300 or infinite\n"
+    "                                (default infinite)\n"
+    "  -i, --interval-ms <ms>        Blink or alarm on/off time, or dark time after\n"
+    "                                each fade cycle, 100-10000 (default 500)\n"
     "  -d, --duration-ms <ms>        Fade ramp time, 500-60000 (default 1000)\n"
     "\n"
     "Visualizer options:\n"
@@ -70,9 +73,13 @@ static const char help_text[] =
     "                                or sudo\n"
     "\n"
     "Fades take green or amber. Effects run until Ctrl-C unless --count is given;\n"
-    "finite runs must fit in 60 seconds. Streams end with their input. Every effect,\n"
-    "stream, and visualizer finishes with a reset. The visualizer needs System Audio\n"
-    "Recording permission for your terminal app, and macOS 14.2 or later.\n"
+    "finite runs must fit in 60 seconds. Streams end with their input.\n"
+    "A timer takes 10s to 24h, such as 25m, 90s, or 1h30m; a plain number is\n"
+    "minutes. It dims green as time runs out and turns amber for the last fifth,\n"
+    "at most 5 minutes. Its alarm flashes until --count or Ctrl-C, which exits 0.\n"
+    "Every effect, stream, timer, and visualizer finishes with a reset. The\n"
+    "visualizer needs System Audio Recording permission for your terminal app,\n"
+    "and macOS 14.2 or later.\n"
     "Diagnostics, brightness, and effects require cable firmware " FW_SUPPORTED_VERSION_TEXT ".\n"
     "Hardware commands run through sudo, which may ask for your password.\n";
 
@@ -94,6 +101,7 @@ typedef enum {
   CMD_LED_FADE,
   CMD_LED_STREAM,
   CMD_VISUALIZER,
+  CMD_TIMER,
 } Command;
 
 static const struct {
@@ -118,6 +126,7 @@ static const struct {
     [CMD_LED_FADE] = {"led fade", " <color> [-c <n>] [-d <ms>] [-i <ms>]", 1, 1},
     [CMD_LED_STREAM] = {"led stream", " <color>", 1, 1},
     [CMD_VISUALIZER] = {"visualizer", " [<color>] [--preview]", 0, 1},
+    [CMD_TIMER] = {"timer", " <duration> [-c <n>] [-i <ms>]", 1, 1},
 };
 
 static const char *const mode_names[] = {[SMC_LED_AUTO] = "auto",
@@ -135,6 +144,7 @@ typedef struct {
   unsigned percent;     /* led brightness */
   FwColor color;        /* led brightness, blink, fades, stream, and visualizer */
   bool alternate;       /* led blink alternate */
+  unsigned long timer_ms;
   unsigned count, interval_ms, duration_ms;
 } Options;
 
@@ -331,6 +341,19 @@ static int find_command(int count, char **words, Command *command, char *error, 
   return fail(error, size, "unknown command '%s %s'", words[0], words[1]);
 }
 
+/* The --count, --interval-ms, and --duration-ms values, where given. */
+static int parse_repeat(Options *o, const char *count, const char *interval, const char *duration,
+                        char *error, size_t size) {
+  if (count && !strcmp(count, "infinite")) o->count = LED_INFINITE;
+  else if (count && parse_number(count, 1, MAX_COUNT, &o->count))
+    return fail(error, size, "invalid --count '%s' (expected 1-%u or infinite)", count, MAX_COUNT);
+  if (interval && parse_number(interval, 100, 10000, &o->interval_ms))
+    return fail(error, size, "invalid --interval-ms '%s' (expected 100-10000)", interval);
+  if (duration && parse_number(duration, 500, 60000, &o->duration_ms))
+    return fail(error, size, "invalid --duration-ms '%s' (expected 500-60000)", duration);
+  return 0;
+}
+
 static int parse_effect(Options *o, const char *color, const char *count, const char *interval,
                         const char *duration, char *error, size_t size) {
   bool blink = o->command == CMD_LED_BLINK;
@@ -339,18 +362,29 @@ static int parse_effect(Options *o, const char *color, const char *count, const 
   else if (parse_color(color, &o->color))
     return fail(error, size, "invalid color '%s' (expected %s)", color,
                 blink ? "green, amber, or alternate" : "green or amber");
-  if (count && !strcmp(count, "infinite")) o->count = LED_INFINITE;
-  else if (count && parse_number(count, 1, MAX_COUNT, &o->count))
-    return fail(error, size, "invalid --count '%s' (expected 1-%u or infinite)", count, MAX_COUNT);
-  if (interval && parse_number(interval, 100, 10000, &o->interval_ms))
-    return fail(error, size, "invalid --interval-ms '%s' (expected 100-10000)", interval);
-  if (duration && parse_number(duration, 500, 60000, &o->duration_ms))
-    return fail(error, size, "invalid --duration-ms '%s' (expected 500-60000)", duration);
+  if (parse_repeat(o, count, interval, duration, error, size)) return -1;
   if (o->count != LED_INFINITE && total_ms(o) > MAX_TOTAL_MS)
     return fail(error, size,
                 "planned run time is %lu ms; finite effects are limited to %u ms "
                 "(omit --count to run until stopped)",
                 total_ms(o), MAX_TOTAL_MS);
+  return 0;
+}
+
+/* The timer's alarm time, if it is finite. */
+static unsigned long alarm_ms(const Options *o) { return o->count * 2ul * o->interval_ms; }
+
+static int parse_timer(Options *o, const char *text, const char *count, const char *interval,
+                       char *error, size_t size) {
+  if (timer_parse(text, &o->timer_ms) || o->timer_ms < TIMER_MIN_MS)
+    return fail(error, size, "invalid duration '%s' (expected 10s-24h, such as 25m, 90s, or 1h30m)",
+                text);
+  if (parse_repeat(o, count, interval, NULL, error, size)) return -1;
+  if (o->count != LED_INFINITE && alarm_ms(o) > MAX_TOTAL_MS)
+    return fail(error, size,
+                "planned alarm time is %lu ms; finite alarms are limited to %u ms "
+                "(omit --count to flash until stopped)",
+                alarm_ms(o), MAX_TOTAL_MS);
   return 0;
 }
 
@@ -413,9 +447,10 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
   int given = words - used;
   if (given < commands[o->command].min_arguments || given > commands[o->command].max_arguments)
     return fail(error, size, "usage: magsafe %s%s", name, commands[o->command].usage);
-  if (!is_effect(o->command) && (count || interval || duration))
-    return fail(error, size, "blink and fade options do not apply to '%s'", name);
-  if (o->command == CMD_LED_BLINK && duration)
+  bool timer = o->command == CMD_TIMER;
+  if (!is_effect(o->command) && !timer && (count || interval || duration))
+    return fail(error, size, "blink, fade, and timer options do not apply to '%s'", name);
+  if ((o->command == CMD_LED_BLINK || timer) && duration)
     return fail(error, size, "--duration-ms applies only to fade commands");
   if (o->preview && o->command != CMD_VISUALIZER)
     return fail(error, size, "--preview applies only to 'visualizer'");
@@ -444,6 +479,7 @@ static int parse(int argc, char **argv, Options *o, char *error, size_t size) {
     case CMD_LED_FADE_IN:
     case CMD_LED_FADE_OUT:
     case CMD_LED_FADE: return parse_effect(o, args[0], count, interval, duration, error, size);
+    case CMD_TIMER: return parse_timer(o, args[0], count, interval, error, size);
     default: return 0;
   }
 }
@@ -465,6 +501,7 @@ static void capabilities(void) {
                                           "fade",
                                           "brightness-stream",
                                           "visualizer",
+                                          "timer",
                                           "volatile-brightness",
                                           "reset"};
   static const char *const unavailable[] = {"firmware-flash", "security-write", "calibration-write",
@@ -482,7 +519,7 @@ static void dry_run(const Options *o) {
   begin(commands[o->command].name);
   put_bool("dry_run", true);
   put_number("device_calls", 0);
-  if (o->argument) put_string("color", o->argument);
+  if (o->argument && o->command != CMD_TIMER) put_string("color", o->argument);
   if (o->command == CMD_LED_BRIGHTNESS) put_number("percent", o->percent);
   if (is_effect(o->command)) {
     bool infinite = o->count == LED_INFINITE;
@@ -494,6 +531,17 @@ static void dry_run(const Options *o) {
     else put_number("preparation_ms", preparation_ms(o));
     if (infinite) put_null("duration_ms");
     else put_number("duration_ms", total_ms(o));
+  }
+  if (o->command == CMD_TIMER) {
+    bool infinite = o->count == LED_INFINITE;
+    put_number("timer_ms", o->timer_ms);
+    put_number("warning_ms", timer_warning_ms(o->timer_ms));
+    if (infinite) put_string("count", "infinite");
+    else put_number("count", o->count);
+    put_number("interval_ms", o->interval_ms);
+    put_number("preparation_ms", LED_PREPARE_MS);
+    if (infinite) put_null("duration_ms");
+    else put_number("duration_ms", o->timer_ms + alarm_ms(o));
   }
   if (o->command == CMD_LED_STREAM) put_number("max_rate_hz", LED_STREAM_HZ);
   if (o->command == CMD_VISUALIZER) {
@@ -556,6 +604,20 @@ static int acquire_lock(char *error, size_t size) {
  * mode, and are otherwise silent on success. */
 
 static bool invalid_input; /* led stream stopped at an invalid line */
+
+typedef struct {
+  bool infinite, drawn;
+} Countdown;
+
+/* Show the time left on a terminal, then the alarm. */
+static void show_timer(void *context, unsigned long remaining_ms, bool alarm) {
+  Countdown *countdown = context;
+  char left[16];
+  timer_format(remaining_ms, left, sizeof(left));
+  if (alarm) fprintf(stderr, "\r\033[Ktime's up%s", countdown->infinite ? " (Ctrl-C to stop)" : "");
+  else fprintf(stderr, "\r\033[K%s left", left);
+  countdown->drawn = true;
+}
 
 static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, size_t size) {
   const char *name = commands[o->command].name;
@@ -670,6 +732,30 @@ static int execute(const Options *o, FwClient *fw, SmcClient *smc, char *error, 
       put_string("color", o->argument);
       put_number("values", stream.values);
       put_number("writes", stream.writes);
+      put_number("brightness_percent", 100);
+      put_bool("system_color_control_requested", true);
+      end();
+      return 0;
+    }
+
+    case CMD_TIMER: {
+      Countdown countdown = {.infinite = o->count == LED_INFINITE};
+      LedTimer timer = {.duration_ms = o->timer_ms,
+                        .count = o->count,
+                        .interval_ms = o->interval_ms,
+                        .context = &countdown};
+      if (!json_output && isatty(STDERR_FILENO)) timer.show = show_timer;
+      unsigned long flashes = 0;
+      int result = fw_open(fw, error, size) || smc_open(smc, error, size) ||
+                   led_catch_signals(error, size) ||
+                   led_timer(fw, smc, &timer, &flashes, error, size);
+      if (countdown.drawn) fputc('\n', stderr);
+      if (result) return -1;
+      if (!json_output) return 0;
+      begin(name);
+      put_firmware(fw);
+      put_number("timer_ms", o->timer_ms);
+      put_number("flashes", flashes);
       put_number("brightness_percent", 100);
       put_bool("system_color_control_requested", true);
       end();
