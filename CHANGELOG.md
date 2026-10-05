@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-04
+
 - `timer <duration>` counts down on the light: green dimming as time runs out,
   amber for the last fifth (at most 5 minutes), then amber flashes until Ctrl-C
   or `--count` flashes. Durations such as `25m`, `90s`, and `1h30m` run from
@@ -60,7 +62,8 @@ First release.
 - `--json` output, `--dry-run` plans, and distinct exit codes for scripting.
 - Man page and zsh completion.
 
-[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/mpopv/magsafe-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mpopv/magsafe-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mpopv/magsafe-cli/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mpopv/magsafe-cli/releases/tag/v0.6.0
