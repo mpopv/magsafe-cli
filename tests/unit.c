@@ -11,12 +11,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define RATE 48000.0
+#define RATE 48000.0 /* keep in step with the limited mix buffer below */
 #define FRAME_HZ 30u
 #define FRAME 1600u /* samples per frame at RATE and FRAME_HZ */
-#define MAX_FRAMES 300u
+#define MAX_FRAMES 600u
 
 static int failures, tests;
 
@@ -81,6 +82,34 @@ static double treble(size_t index, double gain) {
   return gain * 0.5 * fade * sin(2.0 * M_PI * 1000.0 * t);
 }
 
+/* A loud, limited mix like the songs that kept version 0.7.0 near full
+ * brightness: a 128 BPM kick, a sustained bass that ducks under each kick,
+ * and broadband noise, driven 12 dB into a limiter. */
+#define MIX_PERIOD 22500u /* samples per beat at 128 BPM */
+#define MIX_SECONDS 10u
+static float limited[MIX_SECONDS * 48000u];
+
+static void make_limited_mix(void) {
+  double kick_phase = 0.0, envelope = 0.0;
+  double attack = exp(-1.0 / (0.001 * RATE)), release = exp(-1.0 / (0.060 * RATE));
+  for (size_t i = 0; i < MIX_SECONDS * (size_t)RATE; ++i) {
+    double t = (double)((i + MIX_PERIOD - KICK_OFFSET) % MIX_PERIOD) / RATE, time = i / RATE;
+    kick_phase += 2.0 * M_PI * (50.0 + 70.0 * exp(-t / 0.04)) / RATE;
+    double kick = exp(-t / 0.12) * sin(kick_phase);
+    double duck = 1.0 - 0.7 * exp(-t / 0.08);
+    double bass =
+        0.6 * duck * (sin(2.0 * M_PI * 55.0 * time) + 0.5 * sin(4.0 * M_PI * 55.0 * time));
+    double x = (kick + bass + noise(i, 0.6)) * 4.0, level = fabs(x); /* +12 dB */
+    envelope = level > envelope ? level + (envelope - level) * attack
+                                : level + (envelope - level) * release;
+    limited[i] = (float)tanh(x * (envelope > 0.9 ? 0.9 / envelope : 1.0));
+  }
+}
+
+static double limited_mix(size_t index, double gain) {
+  return gain * limited[index % (sizeof(limited) / sizeof(*limited))];
+}
+
 static double garbage(size_t index, double gain) {
   if (index % 97 == 0) return NAN;
   if (index % 89 == 0) return -INFINITY;
@@ -92,6 +121,10 @@ static unsigned count_flashes(const unsigned *out, size_t frames) {
   unsigned flashes = 0;
   for (size_t f = 0; f < frames; ++f) flashes += out[f] >= 90 && (f == 0 || out[f - 1] < 90);
   return flashes;
+}
+
+static int compare(const void *a, const void *b) {
+  return (int)*(const unsigned *)a - (int)*(const unsigned *)b;
 }
 
 static unsigned max_of(const unsigned *out, size_t from, size_t to) {
@@ -118,11 +151,11 @@ static void test_analysis(void) {
   frames = run(kick, 1.0, 4.0, out);
   unsigned flashes = count_flashes(out, frames);
   check(flashes == 8, "kick: %u flashes in 4 s, expected 8", flashes);
-  /* Each beat period is 15 frames. The light falls well below full in the
-   * second half of each one. */
+  /* Each beat period is 15 frames. The light is dark in the second half of
+   * each one. */
   for (size_t beat = 0; beat < 7; ++beat) {
     unsigned low = min_of(out, beat * 15 + 8, beat * 15 + 15);
-    check(low <= 25, "kick: beat %zu only falls to %u%%", beat, low);
+    check(low <= 10, "kick: beat %zu only falls to %u%%", beat, low);
   }
 
   run(kick, 0.1, 4.0, quiet);
@@ -133,10 +166,32 @@ static void test_analysis(void) {
   }
   check(difference <= 1, "kick at -20 dB: differs by up to %u%%", difference);
 
-  frames = run(noise, 1.0, 5.0, out);
-  unsigned high = max_of(out, FRAME_HZ, frames), low = min_of(out, FRAME_HZ, frames);
-  check(high < 90, "steady noise: beat flash after settling (max %u%%)", high);
-  check(low >= 15, "steady noise: falls to %u%%", low);
+  /* After the tempo settles, every kick of the limited mix flashes, and the
+   * light falls between kicks, instead of staying near full. */
+  frames = run(limited_mix, 1.0, MIX_SECONDS, out);
+  unsigned kicks = 0, flashed = 0, lit = 0;
+  for (size_t sample = KICK_OFFSET; sample < frames * FRAME; sample += MIX_PERIOD) {
+    size_t f = sample / FRAME;
+    if (f < 3 * FRAME_HZ || f + 12 >= frames) continue;
+    kicks++;
+    flashed += max_of(out, f, f + 3) >= 80;
+    unsigned low = min_of(out, f + 6, f + 12);
+    check(low <= 15, "limited mix: the kick at frame %zu only falls to %u%%", f, low);
+  }
+  for (size_t f = 3 * FRAME_HZ; f < frames; ++f) lit += out[f] >= 60;
+  check(flashed == kicks, "limited mix: %u of %u kicks flash to 80%%", flashed, kicks);
+  check(lit * 3 < frames - 3 * FRAME_HZ, "limited mix: %u of %zu frames at 60%% or more", lit,
+        frames - 3 * FRAME_HZ);
+
+  /* Steady noise has no beat. It may flash now and then, but stays dim. */
+  frames = run(noise, 1.0, 10.0, out);
+  unsigned noise_flashes = count_flashes(out + 2 * FRAME_HZ, frames - 2 * FRAME_HZ);
+  unsigned sorted[MAX_FRAMES];
+  memcpy(sorted, out + 2 * FRAME_HZ, (frames - 2 * FRAME_HZ) * sizeof(unsigned));
+  qsort(sorted, frames - 2 * FRAME_HZ, sizeof(unsigned), compare);
+  unsigned median = sorted[(frames - 2 * FRAME_HZ) / 2];
+  check(noise_flashes <= 12, "steady noise: %u flashes in 8 s", noise_flashes);
+  check(median <= 20, "steady noise: median %u%%", median);
 
   frames = run(treble, 1.0, 3.0, out);
   check(max_of(out, 0, frames) == 0, "1 kHz tone: max %u%%, expected 0", max_of(out, 0, frames));
@@ -144,15 +199,18 @@ static void test_analysis(void) {
   frames = run(garbage, 1.0, 3.0, out);
   check(max_of(out, 0, frames) <= 100, "garbage input: max %u%%", max_of(out, 0, frames));
 
-  /* Empty frames count as silence. */
+  /* A kick after silence flashes, and empty frames count as silence. */
   VizState state;
   viz_init(&state, RATE, FRAME_HZ);
-  float buffer[FRAME];
+  float buffer[FRAME] = {0};
+  for (int f = 0; f < 10; ++f) viz_step(&state, buffer, FRAME);
   for (size_t i = 0; i < FRAME; ++i) buffer[i] = (float)kick(i + KICK_OFFSET, 1.0);
   unsigned first = viz_step(&state, buffer, FRAME), last = first;
   for (int f = 0; f < 60; ++f) last = viz_step(&state, NULL, 0);
-  check(first == 100 && last == 0, "empty frames: %u%% then %u%%, expected 100%% then 0%%", first,
-        last);
+  check(first == 100 && last == 0,
+        "kick after silence, then empty frames: %u%% then %u%%, "
+        "expected 100%% then 0%%",
+        first, last);
 }
 
 /* Stream parser */
@@ -202,6 +260,7 @@ static void test_stream(void) {
 }
 
 int main(void) {
+  make_limited_mix();
   test_analysis();
   test_stream();
   if (failures) {

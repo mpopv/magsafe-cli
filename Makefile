@@ -31,6 +31,12 @@ build/unit-test: $(UNIT_SOURCES) $(HEADERS)
 	@mkdir -p build
 	$(CC) -std=c11 $(CFLAGS) $(LDFLAGS) -Isrc $(UNIT_SOURCES) -o $@
 
+# Development tool, not installed: see tools/analyze.m.
+build/analyze: tools/analyze.m src/analysis.c src/analysis.h
+	@mkdir -p build
+	$(CC) -fobjc-arc $(CFLAGS) $(LDFLAGS) -Isrc tools/analyze.m src/analysis.c \
+	  -framework AudioToolbox -framework Foundation -o $@
+
 test: build/magsafe build/unit-test
 	build/unit-test
 	sh tests/cli.sh build/magsafe
@@ -46,7 +52,7 @@ uninstall:
 	  "$(DESTDIR)$(ZSHDIR)/_magsafe"
 
 format:
-	xcrun clang-format -i $(C_SOURCES) $(OBJC_SOURCES) $(HEADERS) tests/*.c
+	xcrun clang-format -i $(C_SOURCES) $(OBJC_SOURCES) $(HEADERS) tests/*.c tools/*.m
 
 clean:
 	rm -rf build

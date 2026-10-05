@@ -137,7 +137,11 @@ magsafe visualizer amber
 magsafe visualizer --preview    # levels in the terminal; no cable or sudo
 ```
 
-The light follows whatever the Mac is playing. It brightens with the bass (40–160 Hz) and flashes to full brightness on each kick drum or other sharp rise in the bass. Automatic gain gives quiet and loud music the same range, and silence leaves the light dark. The color stays the same for the whole run, because a color change takes the cable 450 ms in the dark.
+The light flashes with the kick drum of whatever the Mac is playing, and falls to a dim glow between kicks, even in loud, heavily limited songs that stay at one volume. The color stays the same for the whole run, because a color change takes the cable 450 ms in the dark.
+
+- **Beats:** every 5 ms, `magsafe` looks for sharp rises in three bass bands between 30 and 160 Hz. A rise that stands out from the song's own recent rises is a beat. Its flash depends on how much it stands out compared with the song's typical beat, so overall loudness doesn't matter.
+- **Tempo:** the rises also give a tempo between 70 and 180 BPM and a grid of beats. When nearly every grid beat has a beat, as with a kick on every beat, kicks on the grid flash to full brightness, and other hits between them, such as bass notes, flash at about half. Syncopated beats, as in hip hop and dubstep, keep their full flashes. Flashes fade over about a third of the beat period.
+- **Glow:** between beats, a dim glow follows the bass level within its recent range. It grows when no beats come for a few seconds, as in a breakdown. Silence leaves the light dark.
 
 - **Audio:** a Core Audio process tap captures a mono mix of everything the Mac plays, without a virtual audio driver. This needs macOS 14.2 or later.
 - **Permission:** macOS grants System Audio Recording permission per app, and for a command-line tool that app is your terminal. On the first run, macOS asks whether to allow it. If you deny it, or your terminal app gets no prompt, `magsafe` stops with instructions: allow the app, or add it under **System Audio Recording Only**, in System Settings > Privacy & Security > Screen & System Audio Recording, then run `magsafe` again.
@@ -255,7 +259,7 @@ There is no firmware flashing, no raw memory or PWM access, no security or calib
 | [`src/led.c`](src/led.c) | Brightness, blink, fade, stream, and reset |
 | [`src/stream.c`](src/stream.c) | `led stream` input parsing |
 | [`src/visualizer.c`](src/visualizer.c) | Visualizer frame loop and latency delay |
-| [`src/analysis.c`](src/analysis.c) | Bass filter, automatic gain, and beat detection |
+| [`src/analysis.c`](src/analysis.c) | Beat detection, tempo grid, and glow |
 | [`src/audio.m`](src/audio.m) | System audio capture with a Core Audio process tap (Objective-C) |
 | [`src/firmware.c`](src/firmware.c) | Cable firmware commands |
 | [`src/hpm.c`](src/hpm.c) | AppleHPM transport (private interface) |
@@ -280,7 +284,7 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 - signal cleanup
 - visible light output
 
-In a user's run of the visualizer, macOS prompted for System Audio Recording permission and the visualizer worked after the prompts were accepted, with no changes in System Settings. The parent and helper process handling was also tested with a stand-in helper.
+In a user's run of the visualizer, macOS prompted for System Audio Recording permission and the visualizer worked after the prompts were accepted, with no changes in System Settings. The parent and helper process handling was also tested with a stand-in helper. The kick-keyed analysis in 0.8.0 was tuned and tested on limited mixes of Apple Loops, not yet on released songs.
 
 ## Development
 
@@ -289,6 +293,14 @@ make          # build build/magsafe
 make test     # run unit and CLI tests (no cable, audio, or sudo needed)
 make format   # format sources with clang-format
 make clean    # remove build output
+```
+
+To see what the visualizer does with a song, build the analysis tool and run it on audio files. It prints the light as a line of 30 characters per second, with statistics. Several files are looped and mixed, so that loops can stand in for a song, and `--limit` drives the mix into a limiter, as loud mastering does:
+
+```sh
+make build/analyze
+build/analyze song.m4a
+build/analyze --limit --seconds 10 drums.caf bass.caf synth.caf
 ```
 
 [CI](.github/workflows/ci.yml) builds with `-Werror`, runs the tests, and checks formatting and the man page on every push to `main` and every pull request.

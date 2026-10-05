@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- The visualizer flashes with the kick drum and falls to a dim glow between
+  kicks, even in loud, heavily limited songs, which used to keep the light
+  near full brightness. It finds beats as rises in three bass bands that stand
+  out from the song's own recent rises, scales each flash to the song's typical
+  beat, and follows the tempo: with a kick on nearly every beat, other hits
+  between the kicks flash dimmer, and flashes fade with the beat period.
+- `make build/analyze` builds a development tool that shows what the visualizer
+  does with audio files.
+- The new analysis was tuned and tested on limited mixes of Apple Loops, not
+  yet on released songs.
+
 ## [0.7.0] - 2026-10-04
 
 - `visualizer` pulses the light to whatever the Mac is playing. It follows the
