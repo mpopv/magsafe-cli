@@ -59,6 +59,11 @@ int protocol_check(const DaemonRequest *request, char *error, size_t size);
 int protocol_arguments(const DaemonRequest *request, char *bytes, char **argv, char *error,
                        size_t size);
 
+/* Compare versions such as "0.11.0" part by part: negative, zero, or positive
+ * as a is older than, the same as, or newer than b. A missing or non-numeric
+ * part counts as 0. */
+int protocol_compare_versions(const char *a, const char *b);
+
 void protocol_reply(DaemonReply *reply, const char *version, DaemonStatus status,
                     const char *message);
 int protocol_check_reply(const DaemonReply *reply, char *error, size_t size);

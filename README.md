@@ -182,14 +182,18 @@ Settings are the brightness and color mode that the light returns to after every
 ### Daemon
 
 ```sh
-sudo magsafe daemon install       # once, and after each upgrade
+sudo magsafe daemon install       # once
 magsafe daemon status
 sudo magsafe daemon uninstall
 ```
 
 The daemon is a root background service, started by launchd at boot, that runs `magsafe` commands for you without a password. Commands behave exactly as through sudo: the same output, `--json`, exit codes, and Ctrl-C. It serves root, the user at the Mac's screen, and admins.
 
-`daemon install` copies `magsafe` to `/Library/PrivilegedHelperTools/com.mpopv.magsafe`, owned by root, because a root service must not run a file that your user account can change, as it can under Homebrew. So after `brew upgrade`, run `sudo magsafe daemon install` again. Until you do, `magsafe` notices that the versions differ, says so, and uses sudo. Without the daemon, or with `MAGSAFE_NO_DAEMON=1`, commands use sudo as before. The daemon logs to `/Library/Logs/magsafe-daemon.log`.
+`daemon install` copies `magsafe` to `/Library/PrivilegedHelperTools/com.mpopv.magsafe`, owned by root, because a root service must not run a file that your user account can change, as it can under Homebrew. Only someone who can use sudo may replace that copy, so the daemon doesn't update itself.
+
+After `brew upgrade`, the first command that needs root notices that the daemon is older, prints `updating the daemon`, and runs `sudo magsafe daemon install` for you. sudo asks for your password once, and the command then runs through the new daemon. If the update fails, as without a terminal for the password, the command uses sudo. A daemon newer than `magsafe` is never replaced this way.
+
+Without the daemon, or with `MAGSAFE_NO_DAEMON=1`, commands use sudo as before. The daemon logs to `/Library/Logs/magsafe-daemon.log`.
 
 ### Reading state
 

@@ -1153,11 +1153,54 @@ static bool needs_daemon(const Options *o) {
   }
 }
 
-/* Run the command through the daemon when one is installed and current. */
+/* Run 'sudo magsafe daemon install', which asks for a password on the
+ * terminal if sudo needs one. Its normal output is discarded, so that the
+ * command that follows still prints one result. */
+static int update_daemon(char *error, size_t size) {
+  char path[PATH_MAX];
+  if (executable_path(path, error, size)) return -1;
+  char *args[] = {"/usr/bin/sudo", "--", path, "daemon", "install", NULL};
+  posix_spawn_file_actions_t actions;
+  posix_spawn_file_actions_init(&actions);
+  posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+  pid_t pid;
+  int result = posix_spawn(&pid, args[0], &actions, NULL, args, environ);
+  posix_spawn_file_actions_destroy(&actions);
+  if (result) return fail(error, size, "cannot run /usr/bin/sudo: %s", strerror(result));
+  int status;
+  while (waitpid(pid, &status, 0) < 0)
+    if (errno != EINTR) return fail(error, size, "cannot wait for sudo: %s", strerror(errno));
+  if (!WIFEXITED(status) || WEXITSTATUS(status))
+    return fail(error, size, "'sudo magsafe daemon install' did not finish");
+  return 0;
+}
+
+/* Run the command through the daemon when one is installed. After an
+ * upgrade, the daemon is older than this command: update it once, with the
+ * password that sudo would ask for anyway, then use it. */
 static int route(int argc, char **argv, int *code, char *error, size_t size) {
   if (geteuid() == 0 || getenv(DAEMON_CHILD_ENV) || getenv("MAGSAFE_NO_DAEMON"))
     return DAEMON_UNAVAILABLE;
-  int result = daemon_request(argc - 1, argv + 1, VERSION, code, error, size);
+  char found[DAEMON_VERSION_MAX] = "";
+  int result = daemon_request(argc - 1, argv + 1, VERSION, code, found, error, size);
+  /* A test daemon is never updated, so that tests can't change a real one. */
+  if (result == DAEMON_OUTDATED && protocol_compare_versions(VERSION, found) > 0 &&
+      !getenv("MAGSAFE_SOCKET")) {
+    fprintf(stderr, "magsafe: updating the daemon from %s to %s\n", found, VERSION);
+    if (update_daemon(error, size)) {
+      fprintf(stderr, "magsafe: cannot update the daemon: %s; using sudo\n", error);
+      *error = '\0';
+      return DAEMON_UNAVAILABLE;
+    }
+    result = daemon_request(argc - 1, argv + 1, VERSION, code, found, error, size);
+  }
+  if (result == DAEMON_OUTDATED) {
+    fprintf(stderr,
+            "magsafe: the daemon is version %s; run 'sudo magsafe daemon install' to replace "
+            "it with %s\n",
+            found, VERSION);
+    result = DAEMON_UNAVAILABLE;
+  }
   if (result == DAEMON_UNAVAILABLE && *error) {
     fprintf(stderr, "magsafe: %s\n", error);
     *error = '\0';

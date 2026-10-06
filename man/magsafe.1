@@ -127,9 +127,13 @@ Copy
 to a root-owned path, and start it as a launchd daemon that runs commands
 without a password for root, the user at the screen, and admins.
 The daemon applies the saved settings again at boot, on plug-in, and on wake.
-Run it again after upgrading
-.Nm ;
-until then, commands use
+After an upgrade, the first command that needs root finds the daemon older
+than
+.Nm ,
+updates it by running
+.Ql sudo magsafe daemon install ,
+which asks for a password once, and then uses it.
+If the update fails, the command uses
 .Xr sudo 8 .
 .It Cm daemon uninstall
 Stop and remove the daemon.

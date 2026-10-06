@@ -471,6 +471,16 @@ static void test_protocol(void) {
   check(protocol_request(&request, "1", DAEMON_ARGS_MAX + 1, many, bytes, sizeof(bytes), NULL, 0),
         "protocol: too many arguments sent");
 
+  check(protocol_compare_versions("0.12.0", "0.11.0") > 0 &&
+            protocol_compare_versions("0.11.0", "0.12.0") < 0 &&
+            protocol_compare_versions("0.10.0", "0.9.0") > 0 &&
+            protocol_compare_versions("1.0.0", "0.99.99") > 0 &&
+            protocol_compare_versions("0.11.0", "0.11.0") == 0 &&
+            protocol_compare_versions("0.11", "0.11.0") == 0 &&
+            protocol_compare_versions("0.11.1", "0.11") > 0 &&
+            protocol_compare_versions("", "0.0.0") == 0,
+        "protocol: version comparison");
+
   DaemonReply reply;
   protocol_reply(&reply, "1.2.3", DAEMON_DENIED, "no");
   check(!protocol_check_reply(&reply, NULL, 0) && reply.status == DAEMON_DENIED &&

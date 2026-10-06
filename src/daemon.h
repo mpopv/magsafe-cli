@@ -41,12 +41,14 @@ int daemon_serve(const char *executable, const char *version, const DaemonHooks 
 void daemon_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 #define DAEMON_UNAVAILABLE 1 /* daemon_request: no usable daemon; run the command directly */
+#define DAEMON_OUTDATED 2    /* daemon_request: the daemon is another version */
 
 /* Run argv through the daemon, passing on stop signals, and set *exit_code.
- * Returns 0, DAEMON_UNAVAILABLE (with a reason in error when the user should
- * know it), or -1 if the connection failed while the command ran. */
-int daemon_request(int argc, char **argv, const char *version, int *exit_code, char *error,
-                   size_t size);
+ * Returns 0; DAEMON_UNAVAILABLE, with a reason in error when the user should
+ * know it; DAEMON_OUTDATED, with the daemon's version in found; or -1 if the
+ * daemon failed to start the command, or the connection failed while it ran. */
+int daemon_request(int argc, char **argv, const char *version, int *exit_code,
+                   char found[DAEMON_VERSION_MAX], char *error, size_t size);
 
 /* Ask a running daemon for its version. */
 int daemon_ping(char version[DAEMON_VERSION_MAX], char *error, size_t size);

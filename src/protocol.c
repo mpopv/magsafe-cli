@@ -59,6 +59,20 @@ int protocol_arguments(const DaemonRequest *request, char *bytes, char **argv, c
   return 0;
 }
 
+int protocol_compare_versions(const char *a, const char *b) {
+  while (*a || *b) {
+    unsigned long x = 0, y = 0;
+    for (; *a >= '0' && *a <= '9'; ++a) x = x * 10 + (unsigned long)(*a - '0');
+    for (; *b >= '0' && *b <= '9'; ++b) y = y * 10 + (unsigned long)(*b - '0');
+    if (x != y) return x < y ? -1 : 1;
+    while (*a && *a != '.') ++a;
+    while (*b && *b != '.') ++b;
+    if (*a) ++a;
+    if (*b) ++b;
+  }
+  return 0;
+}
+
 void protocol_reply(DaemonReply *reply, const char *version, DaemonStatus status,
                     const char *message) {
   memset(reply, 0, sizeof(*reply));

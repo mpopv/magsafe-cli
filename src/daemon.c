@@ -421,8 +421,8 @@ static int ask(int fd, const DaemonRequest *request, const char *bytes, DaemonRe
   return protocol_check_reply(reply, error, size);
 }
 
-int daemon_request(int argc, char **argv, const char *version, int *exit_code, char *error,
-                   size_t size) {
+int daemon_request(int argc, char **argv, const char *version, int *exit_code,
+                   char found[DAEMON_VERSION_MAX], char *error, size_t size) {
   DaemonRequest request;
   DaemonReply reply;
   char bytes[DAEMON_BYTES_MAX];
@@ -437,10 +437,8 @@ int daemon_request(int argc, char **argv, const char *version, int *exit_code, c
   if (reply.status != DAEMON_OK) {
     close(fd);
     if (reply.status == DAEMON_MISMATCH) {
-      fail(error, size,
-           "the magsafe daemon is version %s; run 'sudo magsafe daemon install' to update it",
-           reply.version);
-      return DAEMON_UNAVAILABLE;
+      memcpy(found, reply.version, DAEMON_VERSION_MAX);
+      return DAEMON_OUTDATED;
     }
     if (reply.status == DAEMON_DENIED) {
       fail(error, size, "%s", reply.message);

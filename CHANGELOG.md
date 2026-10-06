@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- After an upgrade, the first command that needs root updates the daemon
+  itself: it prints `updating the daemon`, runs `sudo magsafe daemon install`,
+  which asks for your password once, and then runs through the new daemon.
+  There's no need to reinstall by hand. If the update fails, as without a
+  terminal, the command uses sudo, and a daemon newer than `magsafe` is never
+  replaced. This was tested with a stand-in for sudo, not yet on hardware.
+
 ## [0.11.0] - 2026-10-05
 
 - `sudo magsafe daemon install` adds a root launchd daemon that runs `magsafe`

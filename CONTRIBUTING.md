@@ -35,7 +35,7 @@ The visualizer sends 30 frames a second, each held back by the output device's r
 
 `tests/daemon.sh` runs a test daemon as you, on a private socket: a process that is not root may set `MAGSAFE_SOCKET` for both the daemon and its clients, and `MAGSAFE_SETTINGS` for the settings file. The commands such a daemon runs fail at the root-only lock file, and the error coming back through the client shows that the command ran in the daemon with the client's streams. To try a command without the installed daemon, set `MAGSAFE_NO_DAEMON=1`.
 
-The daemon accepts requests only from root, its own user, the user at the screen, and admins, and only of its own version. It parses each command line as the client does, runs only commands that need root, and gives each one a fixed environment. See [`src/protocol.h`](src/protocol.h) for the messages.
+The daemon accepts requests only from root, its own user, the user at the screen, and admins, and only of its own version. A client newer than the daemon updates it by running `sudo magsafe daemon install`, then sends the request again. A test daemon, reached through `MAGSAFE_SOCKET`, is never updated. It parses each command line as the client does, runs only commands that need root, and gives each one a fixed environment. See [`src/protocol.h`](src/protocol.h) for the messages.
 
 ## Source layout
 
@@ -77,6 +77,7 @@ The current code has passed only the dry-run and unit tests. Not yet verified on
 - the timer and Morse code on the cable; their sequences, timing, and signal handling were tested only against stand-in firmware
 - sudo passing the visualizer's pipe through to `led stream`
 - the daemon as root under launchd. A test daemon ran as a user on a private socket; Ctrl-C, a killed client, and exit codes were checked with a stand-in command in place of `magsafe`
+- updating an older daemon on first use; it was tested with a stand-in for sudo that restarted a test daemon
 - settings applied at plug-in and wake, and whether the cable keeps a dim setting when macOS switches between amber and green
 - signal cleanup
 - visible light output
