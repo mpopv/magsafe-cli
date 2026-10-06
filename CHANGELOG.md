@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-06
+
 - After an upgrade, the first command that needs root updates the daemon
   itself: it prints `updating the daemon`, runs `sudo magsafe daemon install`,
   which asks for your password once, and then runs through the new daemon.
@@ -98,7 +100,8 @@ First release.
 - `--json` output, `--dry-run` plans, and distinct exit codes for scripting.
 - Man page and zsh completion.
 
-[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/mpopv/magsafe-cli/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/mpopv/magsafe-cli/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mpopv/magsafe-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/mpopv/magsafe-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mpopv/magsafe-cli/compare/v0.8.0...v0.9.0
